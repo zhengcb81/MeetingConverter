@@ -1,0 +1,4 @@
+# MeetingConverter dependencies
+faster-whisper>=0.10.0
+PyYAML>=6.0
+requests>=2.28.0
