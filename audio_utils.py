@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 MIMO_SUPPORTED = {"wav", "mp3"}
-MAX_BASE64_MB = 9.5
+MAX_BASE64_MB = 4.0
 
 
 def detect_format(path) -> Optional[str]:
@@ -39,9 +39,8 @@ def get_audio_duration(path) -> float:
             str(path),
         ],
         capture_output=True,
-        text=True,
     )
-    return float(result.stdout.strip())
+    return float(result.stdout.decode("utf-8", errors="replace").strip())
 
 
 def _parse_silence_starts(stderr_output: str) -> List[float]:
@@ -117,9 +116,8 @@ def split_by_silence(
             "-",
         ],
         capture_output=True,
-        text=True,
     )
-    silence_starts = _parse_silence_starts(detect.stderr)
+    silence_starts = _parse_silence_starts(detect.stderr.decode("utf-8", errors="replace"))
 
     if not silence_starts:
         silence_starts = [
