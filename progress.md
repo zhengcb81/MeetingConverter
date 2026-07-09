@@ -27,7 +27,7 @@
 - 测试：70 个全绿（+53 个），engines 覆盖率 100%
 
 ## 2026-07-08 P3 完成 — 修复影响产出的行为 bug
-- P3.1 配置键接入：transcribe_one 加 merge_gap_sec/paragraph_max_chars 参数，main() 从 config 读默认值
+- P3.1 配置键接入：transcribe_one 加 merge_gap_sec/paragraph_max_chars 参数
 - P3.2 修复漏翻：删除 _is_mostly_chinese 短路，始终走 LLM 翻译
 - P3.3 --no-translate 不写占位文件：translations=None 时仅写 _原文.txt
 - P3.4 简化 LLM 输出清洗：_clean_output 退化为 return text.strip()
@@ -47,7 +47,7 @@
 - P5.3 失败统计与退出码：main() 累计 failures，非零退出码
 - P5.4 命令对称与兜底修正：cmd_add 支持 --notes；兜底仅 YAML 不存在时用
 - P5.5 配置化硬编码值：translate_api_timeout/translate_paragraph_delay 从 config 读取
-- 验证：py_compile 通过；pytest 138 全绿；覆盖率 88%（+8%）
+- 验证：py_compile 通过；pytest 138 全绿；覆盖率 88%
 
 ## 2026-07-09 P6 完成 — 体验改善
 - P6.2 跳过已完成文件：transcribe_one 检查 _原文.txt 存在则跳过，--force 覆盖
@@ -65,20 +65,19 @@
 - P8.3 GitHub Actions CI：ci.yml 配置 Python 3.8/3.10/3.13 矩阵
 - 验证：138 测试全绿；覆盖率 80%；CI 配置已创建
 
-## 项目完成状态
-- P1-P8 全部完成
-- 138 测试全绿，覆盖率 80%
-- 支持 MiMo-V2.5-ASR + faster-whisper 双引擎
-- 支持 DeepSeek LLM 翻译 + 公司背景知识注入
-- 支持三文件输出、跳过已完成、日志控制
-- CI/CD 配置就绪
-
 ## 2026-07-09 端到端测试通过
-- 修复 Windows subprocess GBK 编码问题
+- 修复 Windows subprocess GBK 编码问题（移除所有 text=True）
 - 调整 MAX_BASE64_MB = 4.0（适配 MiMo 8192 tokens 限制）
 - 安装 ffmpeg 8.1.2（手动下载）
-- 测试文件：DRG对医疗器械行业的影响观点0904.mp3（30分钟）
-- 结果：MiMo ASR + DeepSeek 翻译成功，三文件输出正常
+- 添加 ffmpeg 到系统 PATH（永久生效）
+- 测试文件：DRG对医疗器械行业的影响观点0904.mp3（30分钟）、上峰水泥20250411.mp3（52分钟）、中密控股20240830.mp3（51分钟）
+- 结果：MiMo ASR + DeepSeek 翻译成功，三文件输出正常，无编码警告
+
+## 2026-07-09 全面审查 + 改进计划 v3
+- 审查范围：架构设计、代码质量、测试覆盖、文档完整性
+- 发现：15 项问题（F1-F15）
+- 制定：6 阶段改进计划（P0-P6）
+- 状态：改进计划已记录，待执行
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -87,3 +86,6 @@
 | transcribe.py 被自动格式化 | 1 | 用精确匹配重新读取后编辑 |
 | language 在 prompt 引用前未定义 | 1 | 重排 main()：cfg 加载+language 定义移到 prompt 选择之前 |
 | 翻译器路径删除 _is_mostly_chinese 后未导出 apply_corrections | 1 | 提取模块级 apply_corrections（顺带完成 P5.2） |
+| MiMo API 404 | 1 | 中国区端点：token-plan-cn.xiaomimimo.com |
+| MiMo API 400 (tokens too long) | 1 | 降低 MAX_BASE64_MB = 4.0 |
+| Windows GBK 编码警告 | 2 | 移除所有 text=True，改用 binary 模式手动解码 |

@@ -1,62 +1,148 @@
-# 审查与研究发现
+# MeetingConverter 审查发现
 
-## F1-F19: 代码审查发现（详见 task_plan.md 问题→阶段映射）
-- F1 配置键失效(#5)→P3.1
-- F2 双语漏翻(#2)→P3.2
-- F3 --no-translate 占位文件(#4)→P3.3
-- F4 DeepSeek 清洗误删(#11)→P3.4
-- F5 Py3.8 不兼容(#1)→P4.1
-- F6 中文纠正无边界(#3)→P4.2
-- F7 公司名子串错配(#6)→P4.3
-- F8 p 命名地雷(#14)→P4.4
-- F9 死代码/冗余依赖(#7,#9)→P5.1
-- F10 跨模块私有调用(#10)→P5.2
-- F11 失败静默(#12)→P5.3
-- F12 命令不对称/兜底复活(#17,#18)→P5.4
-- F13 硬编码(#19)→P5.5
-- F14 无批量无断点(#8)→P6.1
-- F15 不跳过已完成(#13)→P6.2
-- F16 无 logging(#20)→P6.3
-- F17 wiki 未文档化(#21)→P6.4
-- F18 README/REVIEW 滞后(#15,#16)→P7
-- F19 0 测试(#22)→P1+P8
+## F1: transcribe.py 职责过多
+- 日期：2026-07-09
+- 位置：transcribe.py (425行)
+- 问题：
+  - 主入口 + 段落合并 + 文件I/O + 格式化 + 批量调度
+  - Paragraph 类不应在此文件
+  - write_* 函数应独立
+  - 无法独立测试文件输出逻辑
+- 影响：可测试性差，修改一处可能影响全局
+- 建议：拆分为 core/pipeline.py + core/output.py + core/batch.py + core/formatter.py
 
-## F20: MiMo-V2.5-ASR API 研究
-- 日期：2026-07-08
-- 来源：https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/Speech-Recognition
-- 要点：
-  - 端点：POST https://api.xiaomimimo.com/v1/chat/completions（OpenAI 兼容）
-  - 认证：header `api-key: $MIMO_API_KEY`（注意非 Bearer）
-  - 模型名：mimo-v2.5-asr（唯一 ASR 模型）
-  - 请求体：messages[].content[].type="input_audio", input_audio.data=data URL 或 base64+format
-  - 参数：asr_options.language = auto/zh/en（未配置则自动检测）
-  - 格式：仅 wav/mp3；MIME: audio/wav, audio/mpeg
-  - 大小：base64 后 ≤ 10MB（原始约 7.5MB）
-  - 输出：choices[0].message.content（整段文本，无 segment 时间戳）
-  - 计费：¥0.5/小时按音频时长
-  - 独立 API key，与 deepseek_api_key 分开
-- 影响：
-  - 需 TranscriptionEngine 抽象层（P1）
-  - 需音频切片处理长会议（D7, P2.2）
-  - 需无时间戳段落合并（D8, P2.3）
-  - 非 wav/mp3 回退 Whisper（D6, P2.4）
+## F2: 类型系统不一致
+- 日期：2026-07-09
+- 位置：transcribe.py:84 vs engines/base.py:10
+- 问题：
+  - Paragraph 用 dict 列表存储 segments
+  - Segment 已定义为 dataclass
+  - 两套类型系统混用
+- 影响：类型不安全，IDE 无法提供完整提示
+- 建议：Paragraph.segments 改为 List[Segment]
 
-## F21: 架构决策
-- D1 始终送 LLM 翻译（移除 _is_mostly_chinese）
-- D2 from __future__ import annotations（Py3.8 兼容）
-- D3 保留 DeepSeek thinking，_clean_output 仅 trim
-- D6 非 wav/mp3 回退 Whisper（不转码）
-- D7 ffmpeg 静音切片拼接长音频
-- D8 按句末标点+max_chars 切段（无时间戳）
-- D9 CLI --engine + config transcription_engine 双通道
-- D10 完整测试体系+CI（单测+mock集成+fixtures+pytest+coverage>80%+GitHub Actions）
+## F3: 回退逻辑不完整
+- 日期：2026-07-09
+- 位置：engines/fallback.py:26
+- 问题：
+  - 只捕获 UnsupportedFormatError
+  - MiMo API 超时、网络错误、429 限流不触发回退
+- 影响：网络不稳定时直接失败，而非降级到 Whisper
+- 建议：捕获所有异常，记录日志后回退
 
-## F22: 新增模块规划
-- engines/base.py：TranscriptionEngine(Protocol), Segment, TranscriptionResult
-- engines/whisper.py：WhisperEngine（包裹 faster-whisper）
-- engines/mimo.py：MiMoEngine（MiMo API + 切片 + 文本分段）
-- engines/factory.py：引擎选择与回退链
-- audio_utils.py：格式检测、大小估算、静音切片
-- text_merger.py：无时间戳文本分段
-- tests/：完整测试目录（conftest + 各模块测试 + fixtures）
-- .github/workflows/ci.yml：CI 管道
+## F4: company.py 死代码
+- 日期：2026-07-09
+- 位置：company.py:129-133
+- 问题：
+  - return 语句之后还有代码
+  - 永远不会执行
+- 影响：代码混淆，维护者困惑
+- 建议：删除死代码
+
+## F5: text_merger.py 无用常量
+- 日期：2026-07-09
+- 位置：text_merger.py:10
+- 问题：
+  - MAX_BASE64_MB = 9.5 是 audio_utils 的常量
+  - text_merger.py 不需要此常量
+- 影响：误导，暗示两个模块有关联
+- 建议：删除
+
+## F6: 临时文件未清理
+- 日期：2026-07-09
+- 位置：audio_utils.py:133
+- 问题：
+  - 切片文件写入 tempdir
+  - 处理完成后不清理
+  - 长期运行会累积大量临时文件
+- 影响：磁盘空间泄漏
+- 建议：使用 tempfile.NamedTemporaryFile 或处理后清理
+
+## F7: MiMo API 无重试
+- 日期：2026-07-09
+- 位置：engines/mimo.py:121
+- 问题：
+  - translator.py 有重试机制
+  - mimo.py 没有
+  - 临时网络错误直接失败
+- 影响：网络不稳定时用户体验差
+- 建议：添加指数退避重试
+
+## F8: 翻译错误处理不一致
+- 日期：2026-07-09
+- 位置：translator.py:90
+- 问题：
+  - 翻译失败返回 "[翻译失败] {text}" 占位符
+  - transcribe.py 不检查，直接写入输出文件
+  - 用户看到乱七八糟的输出
+- 影响：输出质量下降
+- 建议：抛 TranslationError，由调用方决定处理
+
+## F9: 配置加载逻辑混乱
+- 日期：2026-07-09
+- 位置：translator.py:142-172
+- 问题：
+  - 搜索 4 个路径（含历史遗留 ~/earnings-transcripts）
+  - 隐式合并 API key 的逻辑难以理解
+  - 配置验证分散在各处
+- 影响：配置问题难以排查
+- 建议：统一配置入口，移除历史路径
+
+## F10: 测试覆盖不均
+- 日期：2026-07-09
+- 位置：tests/
+- 问题：
+  - engines/ 100% 覆盖
+  - transcribe.py 仅 55%
+  - company_manager.py 0%
+  - 缺少边界测试
+- 影响：重构信心不足
+- 建议：补充测试到 80%+
+
+## F11: 无真实 API 测试
+- 日期：2026-07-09
+- 位置：tests/
+- 问题：
+  - 所有测试 mock 外部依赖
+  - 无法发现真实 API 问题
+- 影响：部署后才发现 API 兼容性问题
+- 建议：添加 @pytest.mark.network 真实测试
+
+## F12: 文档不完整
+- 日期：2026-07-09
+- 位置：README.md
+- 问题：
+  - 无架构图
+  - 无故障排除指南
+  - 无贡献指南
+  - 无配置参考
+- 影响：新人上手困难
+- 建议：补充文档
+
+## F13: 无插件系统
+- 日期：2026-07-09
+- 位置：engines/factory.py
+- 问题：
+  - 添加新引擎需修改 factory.py
+  - 硬编码引擎选择逻辑
+- 影响：扩展性差
+- 建议：插件化引擎注册
+
+## F14: 无性能监控
+- 日期：2026-07-09
+- 位置：transcribe.py
+- 问题：
+  - 只输出总耗时
+  - 无 STT/翻译/输出分段耗时
+  - 无 RTF 计算
+- 影响：无法量化性能，难以优化
+- 建议：添加 TranscribeMetrics
+
+## F15: 日志不够结构化
+- 日期：2026-07-09
+- 位置：transcribe.py:59
+- 问题：
+  - log() 只是 logger.info 包装
+  - 无结构化字段（文件名、耗时、段落数）
+- 影响：难以做日志分析
+- 建议：使用 structured logging
