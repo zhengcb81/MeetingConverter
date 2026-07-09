@@ -146,7 +146,6 @@ def split_by_silence(
                 str(tmp),
             ],
             capture_output=True,
-            text=True,
         )
         result.append((tmp, start, end))
     return result

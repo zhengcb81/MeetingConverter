@@ -73,6 +73,13 @@
 - 支持三文件输出、跳过已完成、日志控制
 - CI/CD 配置就绪
 
+## 2026-07-09 端到端测试通过
+- 修复 Windows subprocess GBK 编码问题
+- 调整 MAX_BASE64_MB = 4.0（适配 MiMo 8192 tokens 限制）
+- 安装 ffmpeg 8.1.2（手动下载）
+- 测试文件：DRG对医疗器械行业的影响观点0904.mp3（30分钟）
+- 结果：MiMo ASR + DeepSeek 翻译成功，三文件输出正常
+
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
