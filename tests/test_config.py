@@ -24,7 +24,9 @@ class TestLoadConfigFromPath:
         p.write_text(json.dumps({"deepseek_api_key": "k"}), encoding="utf-8")
         assert isinstance(load_config(str(p)), dict)
 
-    def test_missing_file_raises(self, tmp_path):
+    def test_missing_file_raises(self, tmp_path, monkeypatch):
+        # 确保所有搜索路径都不存在
+        monkeypatch.setattr("os.path.exists", lambda p: False)
         with pytest.raises(FileNotFoundError):
             load_config(str(tmp_path / "nonexistent.json"))
 

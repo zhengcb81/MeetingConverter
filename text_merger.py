@@ -7,7 +7,6 @@ from typing import List
 from engines.base import Segment
 
 SENTENCE_ENDERS = set("。！？.!?")
-MAX_BASE64_MB = 9.5
 
 
 def _split_sentences(text: str) -> List[str]:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 from engines.base import TranscriptionResult, UnsupportedFormatError
+
+logger = logging.getLogger(__name__)
 
 
 class FallbackEngine:
@@ -24,6 +27,10 @@ class FallbackEngine:
         try:
             return self._primary.transcribe(audio_path, language, initial_prompt)
         except UnsupportedFormatError:
+            logger.info(f"格式不支持，回退到备用引擎: {audio_path}")
+            return self._get_fallback().transcribe(audio_path, language, initial_prompt)
+        except Exception as e:
+            logger.warning(f"主引擎失败({e})，回退到备用引擎: {audio_path}")
             return self._get_fallback().transcribe(audio_path, language, initial_prompt)
 
     def _get_fallback(self):

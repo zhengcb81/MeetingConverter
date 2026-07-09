@@ -126,12 +126,6 @@ def get_corrections(company_name: str | None) -> dict[str, str]:
     cn_name = _find_company_key(company_name) or company_name
     return companies.get(cn_name, {}).get("corrections", {})
 
-    companies = get_all_companies()
-    for cn_name, info in companies.items():
-        if cn_name in (company_name or ""):
-            return info.get("corrections", {})
-    return {}
-
 
 def _load_wiki_context(company_name: str) -> str:
     """从 company-wiki 加载补充信息"""

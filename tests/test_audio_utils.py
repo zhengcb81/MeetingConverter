@@ -85,7 +85,7 @@ class TestChooseSplitPoints:
 class TestGetAudioDuration:
     def test_calls_ffprobe(self, mocker):
         mock_run = mocker.patch("audio_utils.subprocess.run")
-        mock_run.return_value = MagicMock(stdout="123.45\n")
+        mock_run.return_value = MagicMock(stdout=b"123.45\n")
         dur = get_audio_duration("fake.mp3")
         assert dur == 123.45
         assert mock_run.call_args[0][0][0] == "ffprobe"
@@ -106,14 +106,10 @@ class TestSplitBySilence:
         f.write_bytes(b"\x00" * (10 * 1024 * 1024))
         mocker.patch("audio_utils.get_audio_duration", return_value=300.0)
         mocker.patch("audio_utils._estimate_max_chunk_duration", return_value=100.0)
-        detect_mock = mocker.patch("audio_utils.subprocess.run")
-        detect_mock.return_value = MagicMock(
-            stderr="silence_start: 100.0\nsilence_start: 200.0"
-        )
         mocker.patch(
             "audio_utils.subprocess.run",
             side_effect=[
-                MagicMock(stderr="silence_start: 100.0\nsilence_start: 200.0"),
+                MagicMock(stderr=b"silence_start: 100.0\nsilence_start: 200.0"),
                 MagicMock(),
                 MagicMock(),
                 MagicMock(),

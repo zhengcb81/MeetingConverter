@@ -16,6 +16,7 @@ from audio_utils import (
     estimate_base64_size_mb,
     get_audio_duration,
     split_by_silence,
+    cleanup_chunks,
     MAX_BASE64_MB,
 )
 from engines.base import Segment, TranscriptionResult, UnsupportedFormatError
@@ -75,12 +76,15 @@ class MiMoEngine:
 
     def _transcribe_chunked(self, audio_path: str, language: Optional[str]) -> str:
         chunks = split_by_silence(audio_path)
-        parts = []
-        for chunk_path, _start, _end in chunks:
-            fmt = detect_format(chunk_path) or "mp3"
-            audio_data = self._encode_audio(chunk_path, fmt)
-            parts.append(self._call_api(audio_data, language))
-        return "".join(parts)
+        try:
+            parts = []
+            for chunk_path, _start, _end in chunks:
+                fmt = detect_format(chunk_path) or "mp3"
+                audio_data = self._encode_audio(chunk_path, fmt)
+                parts.append(self._call_api(audio_data, language))
+            return "".join(parts)
+        finally:
+            cleanup_chunks(chunks)
 
     def _encode_audio(self, path, fmt: str) -> str:
         with open(path, "rb") as f:
