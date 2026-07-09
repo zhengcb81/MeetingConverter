@@ -13,6 +13,8 @@ company_manager.py - 公司知识库管理工具
   python company_manager.py import-corr 公司名 --file corrections.txt  # 批量导入纠正
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -81,6 +83,8 @@ def cmd_add(args):
         entry["aliases"] = [a.strip() for a in args.aliases.split(",")]
     if args.products:
         entry["products"] = [p.strip() for p in args.products.split(",")]
+    if args.notes:
+        entry["notes"] = args.notes
     entry["corrections"] = {}
     data[args.name] = entry
     save_companies(data)
@@ -190,6 +194,7 @@ def main():
     p_add.add_argument("--sector", help="行业")
     p_add.add_argument("--aliases", help="别名(逗号分隔)")
     p_add.add_argument("--products", help="产品(逗号分隔)")
+    p_add.add_argument("--notes", help="注意事项")
 
     # update
     p_upd = sub.add_parser("update", help="更新公司信息")
