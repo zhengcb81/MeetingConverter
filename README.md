@@ -2,6 +2,45 @@
 
 基于 MiMo-V2.5-ASR / faster-whisper + DeepSeek LLM，支持段落合并、翻译、公司背景知识注入和三文件输出。
 
+## 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      transcribe.py (CLI)                     │
+│                         ↓ 调用                               │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                  core/ (核心业务逻辑)                     │ │
+│  │  pipeline.py    batch.py    output.py    formatter.py   │ │
+│  │  单文件转写      批量调度     文件输出      时间格式化     │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│         ↓                ↓                ↓                   │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                │
+│  │ engines/ │    │translator│    │ company  │                │
+│  │ 转写引擎 │    │ DeepSeek │    │ 公司知识 │                │
+│  └──────────┘    └──────────┘    └──────────┘                │
+│       ↓                                                ↓     │
+│  ┌──────────┐                                  ┌──────────┐  │
+│  │  MiMo    │  ← API 调用 →                    │companies │  │
+│  │ Whisper  │  ← 本地模型 →                    │  .yaml   │  │
+│  └──────────┘                                  └──────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**数据流**：音频文件 → 引擎转写 → 段落合并 → LLM 翻译 → 三文件输出
+
+**模块职责**：
+| 模块 | 职责 |
+|------|------|
+| `transcribe.py` | CLI 入口，参数解析 |
+| `core/pipeline.py` | 单文件转写主流程 |
+| `core/batch.py` | 批量调度与进度统计 |
+| `core/output.py` | 文件输出（原文/翻译/对照） |
+| `engines/` | 转写引擎抽象（MiMo/Whisper） |
+| `translator.py` | DeepSeek LLM 翻译 |
+| `company.py` | 公司背景知识管理 |
+| `exceptions.py` | 统一异常层级 |
+| `metrics.py` | 性能监控 |
+
 ## 快速开始
 
 ```bash
@@ -163,19 +202,29 @@ pytest tests/ -v
 
 ```
 MeetingConverter/
-├── transcribe.py          # 主入口
+├── transcribe.py          # CLI 入口
+├── config.py              # 配置数据类
+├── config_validator.py    # 配置验证
+├── exceptions.py          # 统一异常层级
+├── metrics.py             # 性能监控
 ├── translator.py          # DeepSeek LLM 翻译
 ├── company.py             # 公司背景知识
 ├── company_manager.py     # 公司知识库管理
 ├── audio_utils.py         # 音频处理工具
-├── text_merger.py         # 文本段落合并
+├── text_merger.py         # 文本段落合并（无时间戳场景）
+├── core/                  # 核心业务逻辑
+│   ├── __init__.py
+│   ├── pipeline.py        # 单文件转写主流程
+│   ├── batch.py           # 批量调度
+│   ├── output.py          # 文件输出
+│   └── formatter.py       # 时间格式化
 ├── engines/               # 引擎抽象层
 │   ├── base.py            # TranscriptionEngine 协议
 │   ├── whisper.py         # Whisper 引擎
 │   ├── mimo.py            # MiMo ASR 引擎
 │   ├── fallback.py        # 回退引擎
 │   └── factory.py         # 引擎工厂
-├── tests/                 # 测试目录
+├── tests/                 # 测试目录（194 个测试）
 ├── companies.yaml         # 公司知识库
 ├── config.json            # 配置文件（不入 git）
 ├── config.example.json    # 配置示例

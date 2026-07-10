@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from engines.base import Segment, TranscriptionResult
-from transcribe import transcribe_one
+from core import transcribe_one
 
 
 @pytest.fixture

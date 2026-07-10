@@ -1,16 +1,29 @@
 {
+    "_comment": "MeetingConverter 配置文件。复制为 config.json 并填入真实值。",
+
+    "_section_deepseek": "=== DeepSeek 翻译配置 ===",
     "deepseek_api_key": "YOUR_API_KEY_HERE",
     "deepseek_base_url": "https://api.deepseek.com",
     "deepseek_model": "deepseek-v4-flash",
+
+    "_section_mimo": "=== MiMo ASR 配置 ===",
     "mimo_api_key": "YOUR_MIMO_API_KEY_HERE",
-    "mimo_base_url": "https://api.xiaomimimo.com/v1/chat/completions",
-    "transcription_engine": "auto",
+    "mimo_base_url": "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+
+    "_section_whisper": "=== Whisper 本地转写配置 ===",
     "whisper_model": "small",
     "whisper_device": "cpu",
     "whisper_compute_type": "int8",
+
+    "_section_transcription": "=== 转写配置 ===",
+    "transcription_engine": "auto",
     "language": null,
     "paragraph_merge_gap_sec": 2.0,
     "paragraph_max_chars": 2000,
+
+    "_section_translation": "=== 翻译配置 ===",
     "translate_batch_size": 5,
-    "translate_max_retries": 3
+    "translate_max_retries": 3,
+    "translate_api_timeout": 120,
+    "translate_paragraph_delay": 0.3
 }

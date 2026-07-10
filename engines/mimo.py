@@ -111,17 +111,30 @@ class MiMoEngine:
         }
 
     def _call_api(self, audio_data_url: str, language: Optional[str]) -> str:
-        payload = self._build_payload(audio_data_url, language)
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            self._base_url,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "api-key": self._api_key,
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result["choices"][0]["message"]["content"].strip()
+        import time
+        from exceptions import EngineError
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                payload = self._build_payload(audio_data_url, language)
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    self._base_url,
+                    data=data,
+                    headers={
+                        "Content-Type": "application/json",
+                        "api-key": self._api_key,
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                    return result["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(f"MiMo API 重试 {attempt + 1}/{max_retries} ({wait}s): {e}")
+                    time.sleep(wait)
+                else:
+                    raise EngineError(f"MiMo API 失败（{max_retries}次重试后）: {e}") from e

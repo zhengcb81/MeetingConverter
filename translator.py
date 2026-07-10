@@ -12,6 +12,8 @@ import time
 import urllib.request
 import urllib.error
 
+from exceptions import TranslationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,7 +89,7 @@ class Translator:
                     time.sleep(wait)
                 else:
                     logger.error(f"  翻译失败: {e}")
-                    return f"[翻译失败] {text}"
+                    raise TranslationError(f"翻译失败（{self.max_retries}次重试后）: {e}") from e
 
     @staticmethod
     def _clean_output(text: str) -> str:
@@ -140,33 +142,28 @@ class Translator:
 
 
 def load_config(config_path: str = None) -> dict:
+    """加载配置文件。
+
+    搜索顺序：
+    1. config_path 参数（显式指定）
+    2. 项目目录 config.json
+
+    Returns:
+        配置字典
+
+    Raises:
+        FileNotFoundError: 找不到配置文件
+    """
     import os
 
     search = [
         config_path,
         os.path.join(os.path.dirname(__file__) or ".", "config.json"),
-        os.path.expanduser("~/MeetingConverter/config.json"),
-        os.path.expanduser("~/earnings-transcripts/config.json"),
     ]
     for p in search:
         if p and os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            if cfg.get("deepseek_api_key") in (None, "", "YOUR_API_KEY_HERE"):
-                ep = os.path.expanduser("~/earnings-transcripts/config.json")
-                if ep != p and os.path.exists(ep):
-                    with open(ep, "r", encoding="utf-8") as f2:
-                        ep_cfg = json.load(f2)
-                    if (
-                        ep_cfg.get("deepseek_api_key")
-                        and ep_cfg["deepseek_api_key"] != "YOUR_API_KEY_HERE"
-                    ):
-                        cfg["deepseek_api_key"] = ep_cfg["deepseek_api_key"]
-                        cfg.setdefault(
-                            "deepseek_base_url", ep_cfg.get("deepseek_base_url")
-                        )
-                        cfg.setdefault("deepseek_model", ep_cfg.get("deepseek_model"))
-            return cfg
+                return json.load(f)
     raise FileNotFoundError(
-        "找不到配置文件，请确保 ~/MeetingConverter/config.json 存在"
+        "找不到配置文件，请确保项目目录下 config.json 存在"
     )

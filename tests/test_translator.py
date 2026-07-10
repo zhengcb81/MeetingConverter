@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from translator import Translator, apply_corrections
+from exceptions import TranslationError
 
 
 @pytest.fixture
@@ -72,11 +73,11 @@ class TestTranslateParagraphRetry:
         assert result == "结果"
         assert translator._call_api.call_count == 2
 
-    def test_returns_failure_marker_after_max_retries(self, translator, mocker):
+    def test_raises_translation_error_after_max_retries(self, translator, mocker):
         mocker.patch.object(translator, "_call_api", side_effect=Exception("boom"))
         mocker.patch("translator.time.sleep")
-        result = translator.translate_paragraph("原文")
-        assert "[翻译失败]" in result
+        with pytest.raises(TranslationError, match="翻译失败"):
+            translator.translate_paragraph("原文")
         assert translator._call_api.call_count == translator.max_retries
 
 
