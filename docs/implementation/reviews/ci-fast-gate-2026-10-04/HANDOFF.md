@@ -20,6 +20,7 @@ Branch: `ci/fast-gate`（未合并 master/main）
 
 - `d0fb843` fix: 修复 CI workflow 表达式错误导致 jobs=0，改为单版本快速测试门
 - `f1272fd` ci: push 触发扩展到全部分支，确保每次 push 都实际跑测试
+- `bd3798f` docs: 本文档（docs-only，其后仅文档变更；代码 head 仍为 `f1272fd`）
 
 ## 2. 根因：jobs=0、测试未运行（重新核对，问题仍存在）
 
@@ -127,12 +128,18 @@ job/step：https://github.com/zhengcb81/MeetingConverter/actions/runs/3724042387
 
 ### 最新 run
 
-| run | event | 结果 | 总时长 |
-|---|---|---|---|
-| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240423879 | push @ `f1272fd` | **success**，jobs=1 | **21s** |
-| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240511159 | pull_request #1 | **success**，jobs=1 | **21s** |
+| run | event | head | 结果 | jobs | 总时长 |
+|---|---|---|---|---|---|
+| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240423879 | push | `f1272fd` | **success** | 1（test=success） | **21s** |
+| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240511159 | pull_request #1 | `f1272fd` | **success** | 1（test=success） | **21s** |
+| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240963596 | push | `bd3798f` | **success** | 1（test=success） | **23s** |
+| https://github.com/zhengcb81/MeetingConverter/actions/runs/37240966158 | pull_request #1 | `bd3798f` | **success** | 1（test=success） | **25s** |
 
-两个事件均确认“至少一个 job 实际运行且执行了测试”。21s ≤ 180s 上限，且远低于 120s 目标，无需为时长砍测试。head commit `f1272fd` 的 check-runs：2 条 `test`，全部 success。
+对照历史 run 29117635443：`failure` / `jobs=0` / `0s`。
+
+两个事件均确认“至少一个 job 实际运行且执行了测试”。全部新 run ≤25s，远低于 180s 上限与 120s 目标，无需为时长砍测试。head commit `f1272fd` 的 check-runs：2 条 `test`，全部 success。
+
+本文件每次推送都会因 `push` + `pull_request` 双触发再产生一对 run；上表是文档定稿时点的记录，分支 Actions 列表为权威来源（已核验为 success/jobs=1）。
 
 PR：https://github.com/zhengcb81/MeetingConverter/pull/1（open，**未合并**；仅用于验证 pull_request 触发）。
 
