@@ -19,8 +19,10 @@ def _load() -> dict:
     return data
 
 
-def _on(data: dict):
-    return data.get("on", data.get(True))
+def _on(data: dict) -> dict:
+    triggers = data.get("on", data.get(True))
+    assert isinstance(triggers, dict), "workflow must declare on: triggers"
+    return triggers
 
 
 def _job() -> dict:
@@ -46,18 +48,32 @@ def _step_runs(steps: list, needle: str) -> list:
     return [s for s in steps if needle in str(s.get("run", ""))]
 
 
+def _covers(config, branch: str) -> bool:
+    branches = config.get("branches")
+    if branches is None:
+        return True
+    return branch in branches or "**" in branches
+
+
 def test_workflow_yaml_parses() -> None:
     data = _load()
     assert data.get("name")
-    assert isinstance(_on(data), dict), "workflow must declare on: triggers"
+    assert _on(data)
 
 
-def test_triggers_cover_push_and_pull_request() -> None:
+def test_push_runs_on_every_branch() -> None:
     on = _on(_load())
-    for event in ("push", "pull_request"):
-        assert event in on, f"missing trigger: {event}"
-        branches = on[event].get("branches", [])
-        assert "master" in branches and "main" in branches
+    assert "push" in on, "missing trigger: push"
+    config = on.get("push") or {}
+    assert _covers(config, "master"), "push must cover the mainline"
+    assert _covers(config, "feature/example"), "push must cover feature branches"
+
+
+def test_pull_request_targets_mainline() -> None:
+    on = _on(_load())
+    assert "pull_request" in on, "missing trigger: pull_request"
+    config = on.get("pull_request") or {}
+    assert _covers(config, "master") and _covers(config, "main")
 
 
 def test_single_job_without_matrix() -> None:
