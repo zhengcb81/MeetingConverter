@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -375,3 +376,93 @@ class TestRerunOverwrite:
 class TestErrorContract:
     def test_mismatch_error_is_value_error(self):
         assert issubclass(OutputCountMismatchError, ValueError)
+
+
+class _FlushBoomHandle:
+    """包装真实 NamedTemporaryFile 句柄：flush() 抛 OSError，其余接口透传。
+
+    真实临时文件已落盘、内容 write() 已成功，把失败精确注入 flush 阶段
+    （模拟 flush 时磁盘满/配额），与既有注入机制（代理字符 write 中途
+    UnicodeEncodeError、monkeypatch os.replace、Windows 真实占用）不同。
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self.flush_failed = False
+
+    @property
+    def name(self):
+        return self._real.name
+
+    @property
+    def closed(self):
+        return self._real.closed
+
+    def write(self, data):
+        return self._real.write(data)
+
+    def flush(self):
+        self.flush_failed = True
+        raise OSError("flush failed (simulated disk full at flush stage)")
+
+    def close(self):
+        return self._real.close()
+
+
+class TestIndependentReviewerCounterexample:
+    """独立审查反例：flush 阶段 OSError 与临时文件工厂创建失败。
+
+    两种失败都发生在目标被触碰之前，必须：异常原样传播、目标旧字节
+    SHA 不变、无 *.tmp 残留。
+    """
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_flush_failure_preserves_target_and_cleans_tmp(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path,
+        monkeypatch,
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        real_factory = tempfile.NamedTemporaryFile
+        created = []
+
+        def _factory(**kwargs):
+            handle = _FlushBoomHandle(real_factory(**kwargs))
+            created.append(handle)
+            return handle
+
+        monkeypatch.setattr("core.output.tempfile.NamedTemporaryFile", _factory)
+
+        with pytest.raises(OSError, match="flush failed"):
+            _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        # 失败确实发生在 flush 阶段（write 已成功、真实临时文件已建）
+        assert created, "必须真正创建过临时文件"
+        assert created[0].flush_failed, "失败必须由 flush() 抛出"
+        assert created[0].closed, "清理阶段必须关闭泄漏的句柄"
+        # 目标旧字节原样保留（SHA 逐文件比对）
+        assert _snapshot(tmp_path) == before
+        # 无临时文件残留
+        assert not [p for p in tmp_path.rglob("*.tmp") if p.is_file()]
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_factory_failure_preserves_target_and_leaves_no_tmp(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path,
+        monkeypatch,
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        def _deny_factory(**kwargs):
+            raise OSError("tmpfile creation denied (simulated)")
+
+        monkeypatch.setattr("core.output.tempfile.NamedTemporaryFile", _deny_factory)
+
+        with pytest.raises(OSError, match="creation denied"):
+            _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        assert _snapshot(tmp_path) == before
+        assert not [p for p in tmp_path.rglob("*.tmp") if p.is_file()]
