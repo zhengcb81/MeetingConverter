@@ -1,0 +1,68 @@
+{
+  "card": "MC-OUTPUT-INTEGRITY",
+  "title": "会议转写输出的完整性与安全写入",
+  "status": "DONE",
+  "date": "2026-10-24",
+  "repository": "C:/Users/郑曾波/Projects/MeetingConverter",
+  "worktree": "C:/Users/郑曾波/Projects/MeetingConverter-output-integrity",
+  "branch": "codex/meetingconverter-output-integrity-20261024",
+  "base_sha": "8a33a7f96292af8e6574d98b959703c6d11919eb",
+  "origin_master_sha": "8a33a7f96292af8e6574d98b959703c6d11919eb",
+  "code_head_sha": "efbb51da26b98e990f97817a88e2b16bc66bb2f8",
+  "commits": [
+    {"sha": "ad620c1", "kind": "code+test", "subject": "fix: 输出长度校验防 zip 静默截断，三 writer 改为临时文件原子写入"},
+    {"sha": "66e31db", "kind": "review-test", "subject": "test: 独立审查写盘失败反例（flush 阶段失败与临时文件创建失败保留旧字节）"},
+    {"sha": "604b6ca", "kind": "docs", "subject": "docs: 独立审查报告"},
+    {"sha": "efbb51d", "kind": "code+test", "subject": "fix: 独立审查发现修复——close 失败强关 fd 兜底清理，异常附结构化计数"},
+    {"sha": "f2de135", "kind": "docs", "subject": "docs: 复审记录（最终 SHA efbb51d）"}
+  ],
+  "acceptance": {
+    "pytest_cmd": "python -B -m pytest -q -o addopts=\"\" tests/test_output.py",
+    "pytest_result": "57 passed, 0 warnings (final; 47 at implementation, 53 after reviewer counterexamples)",
+    "ruff_cmd": "python -B -m ruff check core/output.py tests/test_output.py",
+    "ruff_result": "All checks passed!",
+    "extra_readonly_regression": "tests/test_pipeline.py -> 19 passed",
+    "scope_statement": "聚焦测试与两文件 lint；不代表全仓 coverage>=80% 门通过；未推送、未跑远端 CI；.github/workflows 零改动"
+  },
+  "fixes": {
+    "zip_silent_truncation": "写盘前长度校验，OutputCountMismatchError(ValueError) 含 expected/actual 结构化属性与消息",
+    "overwrite_truncation": "内存完整渲染 -> 同目录临时文件 flush/close -> os.replace 原子替换；失败清理临时件并保留目标旧字节；close 失败时 os.close(fd) 强关兜底",
+    "non_transactional_boundary": "三文件无跨文件原子性，中途失败需调用方整体重跑（已写入模块 docstring 与 plan.md）",
+    "behavior_changes": ["输出字节统一 LF（原 Windows CRLF）", "POSIX 最终文件权限 0600（临时件 inode）"]
+  },
+  "independent_review": {
+    "reviewer": "未参与实现的独立 agent",
+    "initial_verdict": "PASS-with-findings (1 minor + 4 info)",
+    "reviewer_counterexamples": 6,
+    "findings_disposition": {
+      "minor_1_close_failure_tmp_orphan": "fixed in efbb51d + 3 tests",
+      "info_2_structured_counts": "fixed in efbb51d",
+      "info_3_posix_0600": "documented in plan.md",
+      "info_4_lf_newline": "already documented",
+      "info_5_non_transactional": "already documented",
+      "info_6_plan_permission_wording": "corrected in handoff docs batch"
+    },
+    "final_rereview_verdict": "PASS",
+    "final_rereview_target_sha": "efbb51da26b98e990f97817a88e2b16bc66bb2f8",
+    "report": "docs/plans/meetingconverter-output-integrity-2026-10-24/review-independent.md"
+  },
+  "original_repo_protection": {
+    "coverage_file": "派卡时既存 M .coverage 保持原状：未复制/未暂存/未覆盖/未删除，且不在本分支任何提交中",
+    "original_repo_head": "8a33a7f96292af8e6574d98b959703c6d11919eb（全程未动，= origin/master）",
+    "original_repo_status_at_delivery": " M .coverage"
+  },
+  "temp_dir_restoration_evidence": {
+    "pytest_tmp_scan": "/tmp/pytest-of-*/pytest-* 全部运行目录 *.tmp 孤儿 = 0",
+    "system_temp_root": "无本卡临时文件残留（模式 .{name}.*.tmp）",
+    "io_scope": "测试输入/输出仅 pytest tmp_path；未触发 MiMo/DeepSeek、网络、真实音频"
+  },
+  "deliverables": [
+    "core/output.py",
+    "tests/test_output.py",
+    "docs/plans/meetingconverter-output-integrity-2026-10-24/plan.md",
+    "docs/plans/meetingconverter-output-integrity-2026-10-24/review-independent.md",
+    "docs/plans/meetingconverter-output-integrity-2026-10-24/STATUS.md",
+    "docs/handoff/MC-OUTPUT-2026-10-24/handoff.md",
+    "docs/handoff/MC-OUTPUT-2026-10-24/handoff.json"
+  ]
+}

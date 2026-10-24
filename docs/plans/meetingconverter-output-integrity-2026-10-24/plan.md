@@ -49,10 +49,11 @@ Card: `company-wiki docs/plans/du11-source-closure-2026-10-18/harness_lanes/2026
 
 已知的行为变化（有意为之）：临时文件以 `newline=""` 写入，输出字节
 统一为 LF；旧实现 Windows 上默认转换成 CRLF。内容语义不变，换来
-跨平台确定的字节指纹（利于 SHA 校验与 diff）。POSIX 上
-`NamedTemporaryFile` 产物权限为 0600（旧 `open()` 为 umask 默认，
-通常 0644）；被替换的最终文件沿用目标原有权限模型（新建目标为
-umask 默认），Windows 环境无实际影响。
+跨平台确定的字节指纹（利于 SHA 校验与 diff）。POSIX 上临时文件与
+替换后的最终文件都是 `NamedTemporaryFile` 产物的 inode，权限恒为
+0600（旧 `open()` 直写为 umask 默认，通常 0644，且旧目标已有权限
+会保留）；如需放宽，调用方可在此层之上 `os.chmod`。Windows 环境
+无实际影响。
 
 ## 独立审查与发现修复
 
