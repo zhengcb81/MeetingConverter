@@ -1,11 +1,38 @@
-"""tests/test_output.py - core.output 单元测试。"""
+"""tests/test_output.py - core.output 输出完整性与安全写入测试。
+
+所有输入/输出都只落在 pytest tmp_path。每个用例前后用目录快照
+（相对路径 -> SHA-256）核对清单与字节；autouse fixture 保证任何
+用例结束都不残留 *.tmp 孤儿临时文件。不触发 MiMo/DeepSeek、网络
+与真实音频：Paragraph/Segment 全部为合成对象。
+"""
 
 from __future__ import annotations
 
+import hashlib
+import sys
+from pathlib import Path
+
 import pytest
-from core.output import write_original, write_translated, write_bilingual
+
+from core.output import (
+    OutputCountMismatchError,
+    write_bilingual,
+    write_original,
+    write_translated,
+)
 from core.pipeline import Paragraph
 from engines.base import Segment
+
+ALL_WRITERS = [write_original, write_translated, write_bilingual]
+PAIRED_WRITERS = [write_translated, write_bilingual]
+
+
+@pytest.fixture(autouse=True)
+def _no_orphan_tmp_files(tmp_path):
+    """任何用例结束后 tmp_path 内不允许残留 .tmp 临时文件。"""
+    yield
+    orphans = sorted(str(p) for p in tmp_path.rglob("*.tmp") if p.is_file())
+    assert not orphans, f"孤儿临时文件: {orphans}"
 
 
 def _make_paragraph(start, end, text):
@@ -17,11 +44,37 @@ def _make_paragraph(start, end, text):
     return p
 
 
+class BoomParagraph:
+    """start 属性被读取时抛错：模拟渲染中途失败（timestamps=True 时三个
+    writer 都会读取该属性）。"""
+
+    def __init__(self):
+        self.end = 1.0
+
+    @property
+    def start(self):
+        raise RuntimeError("boom during render")
+
+    @property
+    def text(self):
+        raise RuntimeError("boom during render")
+
+
 @pytest.fixture
 def sample_paragraphs():
     return [
         _make_paragraph(0.0, 10.0, "Revenue grew 30% year over year."),
-        _make_paragraph(10.0, 20.0, "Gross margin improved to 21.5%."),
+        _make_paragraph(10.0, 20.0, "毛利率提升至21.5%，环比改善。"),
+        _make_paragraph(20.0, 30.0, "Mixed 中英混合 paragraph number 3。"),
+    ]
+
+
+@pytest.fixture
+def sample_translations():
+    return [
+        "营收同比增长30%",
+        "毛利率提升至21.5%",
+        "混合段落译文第三段",
     ]
 
 
@@ -38,53 +91,287 @@ def sample_meta():
     }
 
 
-class TestWriteOriginal:
-    def test_basic_content(self, sample_paragraphs, sample_meta, tmp_path):
-        out = tmp_path / "original.txt"
-        write_original(out, sample_paragraphs, sample_meta, timestamps=False)
+def _write(writer, path, paragraphs, translations, meta, timestamps=False):
+    if writer is write_original:
+        writer(path, paragraphs, meta, timestamps)
+    else:
+        writer(path, paragraphs, translations, meta, timestamps)
+
+
+def _snapshot(root: Path) -> dict:
+    """目录清单与字节指纹：{相对路径: SHA-256}，作为用例开始/结束状态记录。"""
+    root = Path(root)
+    if not root.exists():
+        return {}
+    return {
+        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _body_texts(writer, paragraphs, translations):
+    """按 writer 返回会进入正文的文本，用于逐条出现与顺序断言。"""
+    if writer is write_original:
+        return [p.text for p in paragraphs]
+    if writer is write_translated:
+        return list(translations)
+    return [frag for pair in zip((p.text for p in paragraphs), translations) for frag in pair]
+
+
+class TestSuccessfulOutput:
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_paragraph_by_paragraph_utf8_content(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        before = _snapshot(tmp_path)
+        assert before == {}
+
+        _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        raw = out.read_bytes()
+        content = raw.decode("utf-8")  # 非 UTF-8 字节会在此失败
+        texts = _body_texts(writer, sample_paragraphs, sample_translations)
+        positions = [content.index(t) for t in texts]
+        assert positions == sorted(positions), "段落/译文必须逐条按顺序出现"
+        for t in texts:
+            assert t in content
+
+        after = _snapshot(tmp_path)
+        assert after == {out.name: hashlib.sha256(raw).hexdigest()}
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    @pytest.mark.parametrize("timestamps", [True, False])
+    def test_timestamp_toggle(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path, timestamps
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        _write(
+            writer, out, sample_paragraphs, sample_translations, sample_meta, timestamps
+        )
         content = out.read_text(encoding="utf-8")
-        assert "earnings_call.mp3" in content
-        assert "Revenue grew 30%" in content
-        assert "Gross margin improved" in content
+        if timestamps:
+            for stamp in (
+                "[00:00:00 -> 00:00:10]",
+                "[00:00:10 -> 00:00:20]",
+                "[00:00:20 -> 00:00:30]",
+            ):
+                assert stamp in content
+        else:
+            assert "[00:00:00 ->" not in content
+            assert "[00:00:10 ->" not in content
 
-    def test_with_timestamps(self, sample_paragraphs, sample_meta, tmp_path):
-        out = tmp_path / "original.txt"
-        write_original(out, sample_paragraphs, sample_meta, timestamps=True)
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    @pytest.mark.parametrize("kind", ["empty", "single", "multi"])
+    def test_empty_single_multiple_paragraphs(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path, kind
+    ):
+        if kind == "empty":
+            paragraphs, translations = [], []
+        elif kind == "single":
+            paragraphs, translations = sample_paragraphs[:1], sample_translations[:1]
+        else:
+            paragraphs, translations = sample_paragraphs, sample_translations
+
+        out = tmp_path / f"{writer.__name__}.txt"
+        _write(writer, out, paragraphs, translations, sample_meta)
+
         content = out.read_text(encoding="utf-8")
-        assert "[00:00:00 -> 00:00:10]" in content
+        assert "音频文件: earnings_call.mp3" in content
+        if writer is write_original:
+            assert f"段落数量: {len(paragraphs)}" in content
+        expected_texts = _body_texts(writer, paragraphs, translations)
+        if kind == "empty":
+            assert "【原文】" not in content
+            assert "【中文】" not in content
+            for t in expected_texts:
+                assert t not in content
+        else:
+            for t in expected_texts:
+                assert t in content
 
-    def test_header_info(self, sample_paragraphs, sample_meta, tmp_path):
-        out = tmp_path / "original.txt"
-        write_original(out, sample_paragraphs, sample_meta, timestamps=False)
+
+class TestCountMismatch:
+    @pytest.mark.parametrize("writer", PAIRED_WRITERS, ids=lambda w: w.__name__)
+    @pytest.mark.parametrize("delta", [-1, 1], ids=["short-by-one", "long-by-one"])
+    def test_mismatch_fails_before_touching_final_file(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path, delta
+    ):
+        translations = (
+            sample_translations[:delta] if delta < 0 else sample_translations + ["多余译文"]
+        )
+        expected_count = len(sample_paragraphs)
+        actual_count = len(translations)
+        out = tmp_path / f"{writer.__name__}.txt"
+
+        with pytest.raises(OutputCountMismatchError) as excinfo:
+            _write(writer, out, sample_paragraphs, translations, sample_meta)
+
+        message = str(excinfo.value)
+        assert f"expected {expected_count}" in message
+        assert f"actual {actual_count}" in message
+        # 目标与临时文件都不存在：校验发生在任何写盘之前
+        assert _snapshot(tmp_path) == {}
+
+    @pytest.mark.parametrize("writer", PAIRED_WRITERS, ids=lambda w: w.__name__)
+    @pytest.mark.parametrize("delta", [-1, 1], ids=["short-by-one", "long-by-one"])
+    def test_mismatch_preserves_existing_target_bytes(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path, delta
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+        before = _snapshot(tmp_path)
+
+        translations = (
+            sample_translations[:delta] if delta < 0 else sample_translations + ["多余译文"]
+        )
+        with pytest.raises(ValueError) as excinfo:
+            _write(writer, out, sample_paragraphs, translations, sample_meta)
+
+        assert "expected 3" in str(excinfo.value)
+        assert _snapshot(tmp_path) == before
+
+    @pytest.mark.parametrize("writer", PAIRED_WRITERS, ids=lambda w: w.__name__)
+    def test_zero_paragraphs_one_translation(
+        self, writer, sample_meta, tmp_path
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        with pytest.raises(OutputCountMismatchError, match="expected 0, actual 1"):
+            _write(writer, out, [], ["多出来的译文"], sample_meta)
+        assert _snapshot(tmp_path) == {}
+
+
+class TestRenderFailure:
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_mid_render_failure_preserves_target(
+        self, writer, sample_translations, sample_meta, tmp_path
+    ):
+        # timestamps=True 确保三个 writer 都会读取段落时间戳属性
+        paragraphs = [_make_paragraph(0.0, 1.0, "正常段落。"), BoomParagraph()]
+        translations = sample_translations[:2]
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        with pytest.raises(RuntimeError, match="boom during render"):
+            _write(writer, out, paragraphs, translations, sample_meta, timestamps=True)
+
+        assert _snapshot(tmp_path) == before
+
+
+class TestTempWriteFailure:
+    # 第二段原文与第二段译文都带孤代理字符：UTF-8 编码在写入中途失败
+
+    @staticmethod
+    def _surrogate_inputs():
+        paragraphs = [
+            _make_paragraph(0.0, 1.0, "正常段落。"),
+            _make_paragraph(1.0, 2.0, "坏字符 \ud800 段落。"),
+        ]
+        translations = ["正常译文。", "坏译文 \ud800。"]
+        return paragraphs, translations
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_mid_write_failure_preserves_target_and_cleans_tmp(
+        self, writer, sample_meta, tmp_path
+    ):
+        paragraphs, translations = self._surrogate_inputs()
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        with pytest.raises(UnicodeEncodeError):
+            _write(writer, out, paragraphs, translations, sample_meta)
+
+        assert _snapshot(tmp_path) == before
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_replace_failure_preserves_target_and_cleans_tmp(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path,
+        monkeypatch
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        def _deny_replace(src, dst):
+            raise OSError("replace denied (simulated)")
+
+        monkeypatch.setattr("core.output.os.replace", _deny_replace)
+        with pytest.raises(OSError, match="replace denied"):
+            _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        assert _snapshot(tmp_path) == before
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows 目标被占用语义")
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_windows_open_target_blocks_replace(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path
+    ):
+        """目标被其他句柄打开时 os.replace 抛 PermissionError（真实场景）。"""
+        out = tmp_path / f"{writer.__name__}.txt"
+        _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+        before = _snapshot(tmp_path)
+
+        with open(out, "r", encoding="utf-8") as held:
+            assert held.read(1)
+            with pytest.raises(PermissionError):
+                _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        assert _snapshot(tmp_path) == before
+
+
+class TestRerunOverwrite:
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_successful_rerun_replaces_whole_file(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+        first = _snapshot(tmp_path)
+
+        new_paragraphs = [
+            _make_paragraph(0.0, 5.0, "Completely new single paragraph."),
+        ]
+        new_translations = ["全新的单段译文。"]
+        _write(writer, out, new_paragraphs, new_translations, sample_meta)
+        after = _snapshot(tmp_path)
+
         content = out.read_text(encoding="utf-8")
-        assert "检测语言: en" in content
-        assert "段落数量: 2" in content
+        new_texts = _body_texts(writer, new_paragraphs, new_translations)
+        for t in new_texts:
+            assert t in content
+        old_texts = set(_body_texts(writer, sample_paragraphs, sample_translations))
+        for t in old_texts - set(new_texts):
+            assert t not in content
+        assert list(after) == [out.name]
+        assert after[out.name] != first[out.name]
 
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_failure_then_success_recovers(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path
+    ):
+        """失败重试后成功：目标最终是完整新文件，且无临时残留。"""
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"old bytes")
+        broken_paragraphs = sample_paragraphs + [BoomParagraph()]
+        broken_translations = sample_translations + ["不会被写出的译文"]
+        with pytest.raises(RuntimeError, match="boom during render"):
+            _write(
+                writer, out, broken_paragraphs, broken_translations, sample_meta,
+                timestamps=True,
+            )
+        assert out.read_bytes() == b"old bytes"
 
-class TestWriteTranslated:
-    def test_basic_content(self, sample_paragraphs, sample_meta, tmp_path):
-        translations = ["营收同比增长30%", "毛利率提升至21.5%"]
-        out = tmp_path / "translated.txt"
-        write_translated(out, sample_paragraphs, translations, sample_meta, timestamps=False)
+        _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
         content = out.read_text(encoding="utf-8")
-        assert "营收同比增长30%" in content
-        assert "毛利率提升至21.5%" in content
-
-    def test_company_name_in_header(self, sample_paragraphs, sample_meta, tmp_path):
-        translations = ["t1", "t2"]
-        out = tmp_path / "translated.txt"
-        write_translated(out, sample_paragraphs, translations, sample_meta, timestamps=False)
-        content = out.read_text(encoding="utf-8")
-        assert "Xiaomi" in content
+        for t in _body_texts(writer, sample_paragraphs, sample_translations):
+            assert t in content
+        assert "old bytes" not in content
+        assert "不会被写出的译文" not in content
 
 
-class TestWriteBilingual:
-    def test_both_languages(self, sample_paragraphs, sample_meta, tmp_path):
-        translations = ["营收同比增长30%", "毛利率提升至21.5%"]
-        out = tmp_path / "bilingual.txt"
-        write_bilingual(out, sample_paragraphs, translations, sample_meta, timestamps=False)
-        content = out.read_text(encoding="utf-8")
-        assert "【原文】" in content
-        assert "【中文】" in content
-        assert "Revenue grew 30%" in content
-        assert "营收同比增长30%" in content
+class TestErrorContract:
+    def test_mismatch_error_is_value_error(self):
+        assert issubclass(OutputCountMismatchError, ValueError)
