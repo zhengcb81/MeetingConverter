@@ -94,3 +94,78 @@
 
 - `66e31db` test: 独立审查写盘失败反例（flush 阶段失败与临时文件创建失败保留旧字节）
 - 本报告的 docs 提交（见 `git log`）
+
+---
+
+# 复审（最终 SHA）
+
+- 复审对象：`efbb51d`（fix: 独立审查发现修复——close 失败强关 fd 兜底清理，异常附结构化计数）
+- 复审人：同一独立审查 agent（未参与实现与修复）
+- 日期：2026-10-24；复审 diff：`git diff 604b6ca..efbb51d`
+
+## 逐项发现处置核验
+
+- **minor #1（close 失败残留 tmp）— 已修复，正确。** 清理分支在
+  `handle.close()` 抛 OSError 时追加 `os.close(handle.fileno())`
+  （core/output.py:126-138），`(OSError, ValueError)` 捕获覆盖
+  EBADF/负 fd/已关句柄三类；成功路径 close() 正常不触发该分支；
+  `os.close` 失败被局部吞掉但最外层裸 `raise`（:147）仍重抛原始
+  异常；仅关闭本句柄 fd 且仅在句柄已放弃时执行，无误关风险。
+  模块 docstring（:8-11）改为"尽力删除"并注明极端残留可能，消除
+  原措辞夸大。**本机实证**：Windows 上打开态临时文件
+  `unlink` → `PermissionError [WinError 32]`，`os.close(fd)` 后
+  unlink 成功——强关分支确为必要且有效。
+  残留理论缺口（非本次引入）：close() 抛非 OSError 异常时清理块
+  直接传播并跳过 unlink；标准库句柄 close 只抛 OSError 族，理论性
+  可接受。
+- **info #2（结构化计数）— 已修复，正确。** `OutputCountMismatchError.__init__(expected, actual)`
+  （core/output.py:31-36）消息文本逐字不变，既有 `raises(match=...)`
+  用例不受影响（57 passed 佐证）；全仓唯一构造点 core/output.py:43，
+  两参签名无破坏面。新增属性断言用例通过。
+- **info #3（POSIX 0600）— 已补记，但补记内容有一处不准确（见新发现 #6）。**
+- **info #4/#5 — 无需改动，确认未动。**
+
+## TestCloseFailureCleanup 真实性挑战 — 成立
+
+- `_CloseBoomHandle`：write/flush 透传真实句柄（成功）、close 抛
+  OSError、`closed` 恒 False、`fileno` 透传真实 fd——失败精确落在
+  close 阶段，清理时 `not handle.closed` 为真、二次 close 再抛、
+  进入 `os.close(handle.fileno())` 强关分支，路径确实走到。
+- 判别力实证：无强关修复时，本机 Windows unlink 打开态文件报
+  WinError 32（已实测），tmp 必残留、用例必失败——测试非永真。
+- `@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")`
+  仅忽略该单一类别、仅类级作用域；噪音来源真实（GC 析构被强关 fd
+  的包装层产生不可抛出 EBADF）；用例以目录扫描直接断言无残留，
+  不依赖 warning 屏蔽掩盖泄漏——范围最小、理由成立。
+
+## 复审测试运行（原样命令、原样计数）
+
+    python -B -m pytest -q -o addopts="" tests/test_output.py
+    → 57 passed in 1.28s（无 warning；53 既有 + TestCloseFailureCleanup 3 + 结构化属性 1）
+
+    python -B -m ruff check core/output.py tests/test_output.py
+    → All checks passed!
+
+定向复跑 `TestCloseFailureCleanup` + `TestErrorContract` → 5 passed。
+
+## 范围核验（8a33a7f..efbb51d）
+
+`M core/output.py`、`M tests/test_output.py`、
+`A docs/plans/meetingconverter-output-integrity-2026-10-24/plan.md`、
+`A docs/plans/meetingconverter-output-integrity-2026-10-24/STATUS.md`、
+`A docs/plans/meetingconverter-output-integrity-2026-10-24/review-independent.md`
+——全部落在允许范围（STATUS.md 属 `docs/plans/meetingconverter-output-integrity-2026-10-24/**`）；
+未触碰 pipeline/batch/engines/translator/CI/配置。
+
+## 复审新发现
+
+| # | 严重度 | 位置 | 内容 |
+|---|--------|------|------|
+| 6 | info | docs/plans/meetingconverter-output-integrity-2026-10-24/plan.md:54-56 | 权限补记中"被替换的最终文件沿用目标原有权限模型（新建目标为 umask 默认）"与 POSIX rename 语义不符：`os.replace` 后最终文件即 tmp 的 inode，权限恒为 mkstemp 的 0600，无论新建还是替换都不沿用旧目标权限或 umask 默认。仅文档准确性问题，Windows 环境无实际影响，不阻塞；建议下轮 handoff 文档中更正表述。 |
+
+## 复审结论
+
+**PASS** — minor #1 与 info #2/#3 均已按审查建议正确修复并有判别力
+测试佐证；57 用例全过、无 warning、ruff 通过；最终 SHA `efbb51d`
+相对 `8a33a7f` 的全部变更仍在允许范围。新发现仅 1 个 info 级文档
+准确性问题（#6），不构成交接阻塞。本 SHA 可交接。
