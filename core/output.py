@@ -7,7 +7,9 @@
   不再依赖 ``zip`` 静默丢弃多出的尾段；
 - 三个 writer 都先在内存中完整渲染，再写入同目录临时文件，
   flush/close 成功后用 ``os.replace`` 原子替换目标；渲染、写入或
-  替换任一阶段失败都会删除临时文件并保留目标旧字节；
+  替换任一阶段失败都会尽力删除临时文件并保留目标旧字节（close
+  自身失败时强关底层 fd 再清理；极端情况下仍可能残留临时文件，
+  但目标旧字节始终不受影响）；
 - 只保证单文件原子性：三个输出文件之间没有跨文件事务。pipeline
   按原文→翻译→对照顺序调用，任一文件替换成功后后续文件失败时，
   已替换的文件保持新内容、失败文件保持旧内容，调用方需要整体重跑。
@@ -26,14 +28,19 @@ from core.formatter import fmt_ts
 class OutputCountMismatchError(ValueError):
     """translations 数量与段落数不一致；expected=段落数，actual=译文数。"""
 
+    def __init__(self, expected: int, actual: int):
+        super().__init__(
+            f"translations 数量与段落数不一致: expected {expected}, actual {actual}"
+        )
+        self.expected = expected
+        self.actual = actual
+
 
 def _check_paired_lengths(paragraphs: list, translations: List[str]) -> None:
     expected = len(paragraphs)
     actual = len(translations)
     if expected != actual:
-        raise OutputCountMismatchError(
-            f"translations 数量与段落数不一致: expected {expected}, actual {actual}"
-        )
+        raise OutputCountMismatchError(expected, actual)
 
 
 def _render_original(paragraphs: list, meta: dict, timestamps: bool) -> str:
@@ -92,7 +99,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     """把 content 原子写入 path：同目录临时文件 flush/close 成功后 os.replace。
 
     临时文件与目标同目录（同文件系统，replace 原子）。写入或替换失败时
-    删除临时文件并原样保留目标旧字节；替换成功后临时文件即目标文件。
+    尽力删除临时文件并原样保留目标旧字节；替换成功后临时文件即目标文件。
     """
     path = Path(path)
     tmp: Path | None = None
@@ -119,7 +126,12 @@ def _atomic_write_text(path: Path, content: str) -> None:
             try:
                 handle.close()
             except OSError:
-                pass
+                # close 自身失败时句柄仍打开，Windows 不允许删除被打开的
+                # 文件；强关底层 fd 让临时文件可以被清理（数据本来就要丢）
+                try:
+                    os.close(handle.fileno())
+                except (OSError, ValueError):
+                    pass
         if tmp is not None and tmp.exists():
             try:
                 tmp.unlink()

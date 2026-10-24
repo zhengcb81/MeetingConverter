@@ -49,9 +49,30 @@ Card: `company-wiki docs/plans/du11-source-closure-2026-10-18/harness_lanes/2026
 
 已知的行为变化（有意为之）：临时文件以 `newline=""` 写入，输出字节
 统一为 LF；旧实现 Windows 上默认转换成 CRLF。内容语义不变，换来
-跨平台确定的字节指纹（利于 SHA 校验与 diff）。
+跨平台确定的字节指纹（利于 SHA 校验与 diff）。POSIX 上
+`NamedTemporaryFile` 产物权限为 0600（旧 `open()` 为 umask 默认，
+通常 0644）；被替换的最终文件沿用目标原有权限模型（新建目标为
+umask 默认），Windows 环境无实际影响。
 
-## 测试矩阵（tests/test_output.py，47 用例）
+## 独立审查与发现修复
+
+未参与实现的独立 agent 审查完整 diff（报告：本目录
+`review-independent.md`），四个重点挑战（zip 截断、Windows 替换语义、
+失败清理、旧字节保留）全部成立；结论 PASS-with-findings，
+1 minor + 4 info，无 blocker/major。审查方自行追加 6 个反例用例
+（flush 阶段失败、临时文件工厂失败，均通过）。实现方已修复：
+
+- **minor #1**：`close()` 自身失败时句柄保持打开，Windows 无法删除
+  被打开的文件 → 清理分支增加 `os.close(handle.fileno())` 强关底层
+  fd（数据本就要丢弃），使临时文件可被 unlink；docstring 措辞改为
+  "尽力删除"并在极端不可关场景说明残留可能。新增
+  `TestCloseFailureCleanup`（3 用例）覆盖该分支。
+- **info #2**：`OutputCountMismatchError` 增加 `expected`/`actual`
+  结构化属性（消息不变）。
+- **info #3**：本文件补记 POSIX 0600 权限差异（见上）。
+- **info #4/#5**：已有声明，无需改动。
+
+## 测试矩阵（tests/test_output.py，57 用例）
 
 全部输入/输出仅在 pytest `tmp_path`；合成 `Paragraph`/`Segment`，
 不触发 MiMo/DeepSeek、网络与真实音频。每用例前后记录目录快照
@@ -71,12 +92,16 @@ Card: `company-wiki docs/plans/du11-source-closure-2026-10-18/harness_lanes/2026
 | Windows 真实占用 | 目标被另一句柄打开（`open()` 未含 FILE_SHARE_DELETE）→ 真实 `PermissionError`；旧字节保留（win32 only，已实证 WinError 5） |
 | 成功重跑覆盖 | 旧正文文本全部消失、新正文完整、快照唯一文件、SHA 变化 |
 | 失败后重试成功 | 先失败保留 `old bytes`，再成功后完整新文件且失败批次文本不存在 |
-| 错误契约 | `OutputCountMismatchError` 是 `ValueError` 子类 |
+| 审查反例：flush 阶段失败 | 假句柄包装真实临时文件，flush 抛 OSError；异常传播、目标 SHA 不变、无 *.tmp（独立审查方添加） |
+| 审查反例：临时文件工厂失败 | NamedTemporaryFile 创建即抛 OSError；同上（独立审查方添加） |
+| close 阶段失败 | 假句柄 close 抛 OSError，实现强关 fd 后仍清理临时件、目标 SHA 不变（发现 #1 修复的验证） |
+| 错误契约 | `OutputCountMismatchError` 是 `ValueError` 子类且带 `expected`/`actual` 属性 |
 
 ## 运行记录（本卡精确范围）
 
     python -B -m pytest -q -o addopts="" tests/test_output.py
-    → 47 passed in 1.49s（Windows，Python 3.13.9，pytest 9.1.1）
+    → 57 passed in 0.82s（Windows，Python 3.13.9，pytest 9.1.1；发现修复后终值）
+    → 中间值：实现提交时 47 passed；独立审查追加反例后 53 passed
 
     python -B -m ruff check core/output.py tests/test_output.py
     → All checks passed!（ruff 0.15.18；顺带修复基线既存 F401/I001）

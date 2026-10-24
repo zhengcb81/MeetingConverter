@@ -377,6 +377,17 @@ class TestErrorContract:
     def test_mismatch_error_is_value_error(self):
         assert issubclass(OutputCountMismatchError, ValueError)
 
+    def test_mismatch_error_has_structured_counts(
+        self, sample_paragraphs, sample_translations, sample_meta, tmp_path
+    ):
+        out = tmp_path / "translated.txt"
+        with pytest.raises(OutputCountMismatchError) as excinfo:
+            write_translated(
+                out, sample_paragraphs, sample_translations[:-1], sample_meta
+            )
+        assert excinfo.value.expected == len(sample_paragraphs)
+        assert excinfo.value.actual == len(sample_translations) - 1
+
 
 class _FlushBoomHandle:
     """包装真实 NamedTemporaryFile 句柄：flush() 抛 OSError，其余接口透传。
@@ -464,5 +475,75 @@ class TestIndependentReviewerCounterexample:
         with pytest.raises(OSError, match="creation denied"):
             _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
 
+        assert _snapshot(tmp_path) == before
+        assert not [p for p in tmp_path.rglob("*.tmp") if p.is_file()]
+
+
+class _CloseBoomHandle:
+    """包装真实 NamedTemporaryFile 句柄：close() 抛 OSError，fd 透传。
+
+    真实临时文件已写入并 flush 成功，失败精确注入 close 阶段（模拟
+    close 时才暴露的写错误）。句柄对外永远报告未关闭，暴露底层 fd
+    供实现强关清理——对应审查发现 #1 的修复分支。
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self.close_failed = False
+
+    @property
+    def name(self):
+        return self._real.name
+
+    @property
+    def closed(self):
+        return False
+
+    def write(self, data):
+        return self._real.write(data)
+
+    def flush(self):
+        return self._real.flush()
+
+    def fileno(self):
+        return self._real.fileno()
+
+    def close(self):
+        self.close_failed = True
+        raise OSError("close failed (simulated write error at close stage)")
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+class TestCloseFailureCleanup:
+    """close 阶段失败：强关底层 fd 后仍必须清理临时件并保留目标旧字节。
+
+    被测路径故意 os.close 底层 fd（数据本就要丢弃），真实临时文件包装层
+    在 GC 析构时对已关 fd 再 close 会产生不可抛出的 EBADF 噪音——属预期
+    副作用而非泄漏（文件已删、fd 已关），故定向忽略该 unraisable warning。
+    """
+
+    @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
+    def test_close_failure_still_cleans_tmp(
+        self, writer, sample_paragraphs, sample_translations, sample_meta, tmp_path,
+        monkeypatch,
+    ):
+        out = tmp_path / f"{writer.__name__}.txt"
+        out.write_bytes(b"previous complete result")
+        before = _snapshot(tmp_path)
+
+        real_factory = tempfile.NamedTemporaryFile
+        handles = []
+
+        def _factory(**kwargs):
+            handle = _CloseBoomHandle(real_factory(**kwargs))
+            handles.append(handle)
+            return handle
+
+        monkeypatch.setattr("core.output.tempfile.NamedTemporaryFile", _factory)
+
+        with pytest.raises(OSError, match="close failed"):
+            _write(writer, out, sample_paragraphs, sample_translations, sample_meta)
+
+        assert handles and handles[0].close_failed, "失败必须由 close() 抛出"
         assert _snapshot(tmp_path) == before
         assert not [p for p in tmp_path.rglob("*.tmp") if p.is_file()]
