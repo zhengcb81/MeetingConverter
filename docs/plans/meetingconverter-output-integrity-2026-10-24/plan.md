@@ -1,3 +1,7 @@
+## ROOT 主线发布记录（2026-10-31）
+
+已验收作者提交ecf9ae82已快进本仓master；隔离输出与pipeline测试76P/1.30秒，原.coverage字节不变。提交本发布记录后正常推送，最终SHA/远端状态由总控PWF记录；不虚构CI已绿。
+
 # 计划 — MC-OUTPUT-INTEGRITY：会议转写输出的完整性与安全写入
 
 Card: `company-wiki docs/plans/du11-source-closure-2026-10-18/harness_lanes/20261024-independent/MC-OUTPUT-INTEGRITY.md`

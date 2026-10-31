@@ -1,3 +1,7 @@
+## ROOT 主线发布记录（2026-10-31）
+
+已验收作者提交ecf9ae82已快进本仓master；隔离输出与pipeline测试76P/1.30秒，原.coverage字节不变。提交本发布记录后正常推送，最终SHA/远端状态由总控PWF记录；不虚构CI已绿。
+
 # STATUS — MC-OUTPUT-INTEGRITY 可恢复执行状态（每次更新于关键节点）
 
 **ALL-DONE（2026-10-24）**：卡全部任务完成。代码 head `efbb51d`（复审 PASS，记录 `f2de135`）；handoff 见 `docs/handoff/MC-OUTPUT-2026-10-24/handoff.md|json`；原仓 `.coverage` 原状未进提交、HEAD 仍 8a33a7f。分支未合并未推送。以下为执行轨迹存档。
