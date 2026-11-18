@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from engines.base import Segment, TranscriptionResult
 from core import transcribe_one
+from engines.base import Segment, TranscriptionResult
 
 
 @pytest.fixture
@@ -20,6 +19,12 @@ def audio_file(tmp_path):
 
 @pytest.fixture
 def mock_engine():
+    """两段间隔 5 秒（> 现有 2 秒合并阈值），因此不会被合并成一段。
+
+    旧 fixture 的第二段 start=30.0 与第一段 end=30.0 相接，间隔为 0，
+    会被 ``merge_into_paragraphs`` 合并成一段；而译文夹具固定返回两段，
+    于是已验收的 writer 正确地以 OutputCountMismatchError 拒绝了它。
+    """
     engine = MagicMock()
     engine.transcribe.return_value = TranscriptionResult(
         language="en",
@@ -27,7 +32,7 @@ def mock_engine():
         duration=60.0,
         segments=[
             Segment(start=0.0, end=30.0, text="Revenue grew 30% year over year."),
-            Segment(start=30.0, end=60.0, text="Gross margin improved to 21.5%."),
+            Segment(start=35.0, end=60.0, text="Gross margin improved to 21.5%."),
         ],
     )
     return engine
@@ -45,7 +50,7 @@ class TestNoTranslateOneFile:
     """P3.3: --no-translate 时 translator_obj=None，仅产 _原文.txt。"""
 
     def test_only_original_file_written(self, mock_engine, audio_file, tmp_output_dir):
-        result = transcribe_one(
+        transcribe_one(
             mock_engine,
             audio_file,
             tmp_output_dir,
@@ -106,6 +111,22 @@ class TestWithTranslateThreeFiles:
         content = (tmp_output_dir / "meeting_中英对照.txt").read_text(encoding="utf-8")
         assert "Revenue grew 30%" in content
         assert "营收同比增长30%" in content
+
+    def test_translator_receives_two_paragraphs(
+        self, mock_engine, mock_translator, audio_file, tmp_output_dir
+    ):
+        """译文夹具的两段对应真实的两段：translator 收到两段，不是合并后的一段。"""
+        transcribe_one(
+            mock_engine,
+            audio_file,
+            tmp_output_dir,
+            translator_obj=mock_translator,
+        )
+        mock_translator.translate_paragraphs.assert_called_once()
+        paragraphs = mock_translator.translate_paragraphs.call_args[0][0]
+        assert len(paragraphs) == 2
+        assert "Revenue grew 30%" in paragraphs[0]
+        assert "Gross margin improved" in paragraphs[1]
 
 
 class TestParagraphLevelEngine:

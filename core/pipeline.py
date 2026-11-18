@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Optional
 
-from core.output import write_original, write_translated, write_bilingual
+from core.feedback import (
+    ROLE_BILINGUAL,
+    ROLE_ORIGINAL,
+    ROLE_TRANSLATED,
+    STAGE_OUTPUT,
+    STAGE_TRANSCRIPTION,
+    STAGE_TRANSLATION,
+    begin_operation,
+)
 from core.formatter import fmt_ts
+from core.output import write_bilingual, write_original, write_translated
 from engines.base import Segment
 from exceptions import TranslationError
-from metrics import TranscribeMetrics, Timer
+from metrics import Timer, TranscribeMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +123,28 @@ def transcribe_one(
     """
     stem = audio_path.stem
     original_file = output_dir / f"{stem}_原文.txt"
+    translated_file = output_dir / f"{stem}_翻译.txt"
+    bilingual_file = output_dir / f"{stem}_中英对照.txt"
+
+    feedback = begin_operation(
+        audio_path=audio_path,
+        output_dir=output_dir,
+        translate_requested=translator_obj is not None,
+        force=force,
+    )
+    feedback.start()
+
     if not force and original_file.exists():
         logger.info(f"跳过 (已完成): {audio_path.name}")
+        feedback.note_engine_not_started()
+        feedback.note_reuse(
+            {
+                "original": original_file.exists(),
+                "translated": translated_file.exists(),
+                "bilingual": bilingual_file.exists(),
+            }
+        )
+        feedback.finish()
         return None
 
     logger.info(f"\n{'=' * 60}")
@@ -128,9 +156,15 @@ def transcribe_one(
 
     with total_timer:
         with Timer() as stt_timer:
-            result = engine.transcribe(
-                str(audio_path), language=language, initial_prompt=initial_prompt
-            )
+            feedback.set_stage(STAGE_TRANSCRIPTION)
+            feedback.note_engine_started()
+            try:
+                result = engine.transcribe(
+                    str(audio_path), language=language, initial_prompt=initial_prompt
+                )
+            except Exception as exc:
+                _fail(feedback, exc, metrics)
+                raise
             lang, lang_prob, duration = (
                 result.language,
                 result.language_probability,
@@ -153,11 +187,13 @@ def transcribe_one(
 
         # 翻译
         translations = None
+        translation_failed = False
         if translator_obj:
             logger.info(
                 f"\n翻译中 (DeepSeek {translator_obj.model}, "
                 f"公司: {company_context.split(chr(10))[0] if company_context else '无'})"
             )
+            feedback.set_stage(STAGE_TRANSLATION)
             with Timer() as trans_timer:
                 try:
                     translations = translator_obj.translate_paragraphs(
@@ -169,6 +205,10 @@ def transcribe_one(
                 except TranslationError as e:
                     logger.warning(f"翻译失败，跳过翻译文件: {e}")
                     translations = None
+                    translation_failed = True
+                except Exception as e:
+                    _fail(feedback, e, metrics)
+                    raise
             metrics.translate_elapsed = trans_timer.elapsed
             if translations is not None:
                 logger.info(f"翻译完成: {trans_timer.elapsed:.1f}秒")
@@ -185,19 +225,45 @@ def transcribe_one(
         }
 
         with Timer() as output_timer:
+            feedback.set_stage(STAGE_OUTPUT)
             orig = output_dir / f"{stem}_原文.txt"
-            write_original(orig, paragraphs, meta, timestamps)
+            try:
+                write_original(orig, paragraphs, meta, timestamps)
+            except Exception as exc:
+                feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
+                _fail(feedback, exc, metrics)
+                raise
+            feedback.note_writer_committed(ROLE_ORIGINAL, orig)
             logger.info(f"  原文: {orig}")
 
             if translations is None:
                 logger.info("  未启用翻译，跳过翻译和中英对照文件")
+                if translation_failed:
+                    # 本轮没有产出译文与对照：旧件仍在，或根本没有。
+                    feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
+                    feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                else:
+                    feedback.note_writer_not_requested(ROLE_TRANSLATED)
+                    feedback.note_writer_not_requested(ROLE_BILINGUAL)
             else:
                 tr = output_dir / f"{stem}_翻译.txt"
-                write_translated(tr, paragraphs, translations, meta, timestamps)
+                try:
+                    write_translated(tr, paragraphs, translations, meta, timestamps)
+                except Exception as exc:
+                    feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
+                    _fail(feedback, exc, metrics)
+                    raise
+                feedback.note_writer_committed(ROLE_TRANSLATED, tr)
                 logger.info(f"  翻译: {tr}")
 
                 bi = output_dir / f"{stem}_中英对照.txt"
-                write_bilingual(bi, paragraphs, translations, meta, timestamps)
+                try:
+                    write_bilingual(bi, paragraphs, translations, meta, timestamps)
+                except Exception as exc:
+                    feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
+                    _fail(feedback, exc, metrics)
+                    raise
+                feedback.note_writer_committed(ROLE_BILINGUAL, bi)
                 logger.info(f"  对照: {bi}")
         metrics.output_elapsed = output_timer.elapsed
 
@@ -205,6 +271,7 @@ def transcribe_one(
     metrics.paragraphs = len(paragraphs)
     metrics.text_length = sum(len(para.text) for para in paragraphs)
     logger.info(f"性能: {metrics.summary()}")
+    feedback.finish(_metric_snapshot(metrics))
 
     return {
         "input": str(audio_path),
@@ -215,3 +282,26 @@ def transcribe_one(
         "text_length": metrics.text_length,
         "rtf": metrics.rtf,
     }
+
+
+# ── 反馈辅助 ──────────────────────────────────────────────────────
+
+
+def _metric_snapshot(metrics: TranscribeMetrics) -> dict:
+    """本轮 metrics 的投影：只给旁路，不新增业务状态库。"""
+    return {
+        "paragraphs": metrics.paragraphs,
+        "duration": metrics.duration,
+        "stt_elapsed": metrics.stt_elapsed,
+        "translate_elapsed": metrics.translate_elapsed,
+        "output_elapsed": metrics.output_elapsed,
+        "total_elapsed": metrics.total_elapsed,
+        "text_length": metrics.text_length,
+    }
+
+
+def _fail(feedback, error: BaseException, metrics: TranscribeMetrics) -> None:
+    """本轮失败：先记录终态，再把原始异常继续抛给调用方。"""
+    feedback.note_abort()
+    feedback.note_error(error)
+    feedback.finish(_metric_snapshot(metrics))

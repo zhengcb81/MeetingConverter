@@ -1,0 +1,24 @@
+# RED 收据 —— tests/test_output_feedback.py 在实现之前的失败形态
+# 复现命令：python -m pytest -q -o addopts= -p no:cacheprovider tests/test_output_feedback.py
+# 做法：只把 core.feedback 换成不可导入（基线 b43a76a 本仓没有反馈适配器），
+#       其余代码与新测试与本卡实施后完全一致。
+
+=================================== ERRORS ====================================
+_______________ ERROR collecting tests/test_output_feedback.py ________________
+ImportError while importing test module 'C:\Users\郑曾波\Projects\_harness_worktrees\f2f\mc\tests\test_output_feedback.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Miniconda\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_output_feedback.py:24: in <module>
+    from core import transcribe_one
+core\__init__.py:3: in <module>
+    from core.pipeline import transcribe_one, Paragraph, merge_into_paragraphs
+core\pipeline.py:12: in <module>
+    from core.feedback import (
+E   ImportError: RED: core.feedback 尚未实现（基线提交没有本仓反馈适配器）
+=========================== short test summary info ===========================
+ERROR tests/test_output_feedback.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 1.03s

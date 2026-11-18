@@ -1,0 +1,831 @@
+"""core/feedback.py - 本仓转录发布的反馈观察投影（``feedback-observation/1``）。
+
+这个模块把一次转录操作的事实投影成跨仓可读���观察行。它只写两样东西：
+``RESEARCH_FEEDBACK_OUT`` 指定的 JSONL 旁路，和该文件同名的 ``*.details.jsonl``
+步骤日志。它不写 stdout、不写 stderr、不改返回值、不改任何产物字节，也不
+触碰逐字稿正文。旁路写不进去时，只在旁路旁边的 ``*.diagnostics.jsonl`` 与
+recorder 自身的计数上报告，业务结果、退出码与重试行为完全由主任务自己决定。
+
+词表（稳定结果词；细节留在本仓的 details 记录里）：
+
+``requested-outputs``
+    expected 取本次请求模式：原文模式 ``original_current``，翻译模式
+    ``original_translated_bilingual_current``，命中已有原件的跳过规则时
+    ``reused_existing``。actual 取本轮真正提交的结果：``original_current`` /
+    ``original_translated_bilingual_current`` / ``previous_translations_only`` /
+    ``missing_translations`` / ``partial_current`` / ``reused_existing`` /
+    ``write_failed`` / ``transcription_failed`` / ``translation_failed``。
+    “本轮产出但只提交了部分目标”“只保留上一版译文”“一次成功的原文模式”
+    是三件不同的事，因此有三个不同的 actual。
+
+``writer-<role>``
+    role 取 ``original`` / ``translated`` / ``bilingual``。actual 取
+    ``committed_this_round`` / ``not_requested`` / ``previous_kept`` /
+    ``absent`` / ``failed``。
+
+``transcription-started``
+    actual 取 ``engine_started`` / ``engine_not_started``，用来证明引擎是否
+    真的被调用过。
+
+``publication-outcome``
+    终态：``published_current`` / ``published_partial`` / ``reused_existing`` /
+    ``write_failed`` / ``transcription_failed`` / ``translation_failed``。
+
+``cost-receipt``
+    本仓没有用量收据，因此费用恒为 ``cost_unknown``，disposition 为
+    ``unknown``。
+
+身份：``step_id`` 为 ``meeting-operation/<input_id>``，``input_id`` 是输入文件
+解析路径的散列——同一文件重投时沿用原 ID，同一批两个同名音频仍然可区分。
+``evidence_ref`` 为 ``mc-output/<input_id>`` 或 ``mc-output/<input_id>/<role>``，
+是本仓能解释的逻辑 ID；真实路径、逐字稿正文、原始异常与凭证只留在本仓的
+details 记录里。
+
+去重：同一 ``(owner, run_id, attempt_id, step_id, check_id)`` 且内容完全相同
+的行只写一次，重投不增加行；同一 step 的 check 内容不同（例如先转录后跳过）
+时仍然是两行，因为那是两件不同的事。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+OBSERVATION_SCHEMA = "feedback-observation/1"
+DETAIL_SCHEMA = "meeting-converter-feedback-detail/1"
+OWNER = "meeting-converter"
+ADAPTER_VERSION = "meeting-converter-feedback/1.0.0"
+
+FEEDBACK_OUT_ENV = "RESEARCH_FEEDBACK_OUT"
+FEEDBACK_RUN_ID_ENV = "RESEARCH_FEEDBACK_RUN_ID"
+FEEDBACK_ATTEMPT_ID_ENV = "RESEARCH_FEEDBACK_ATTEMPT_ID"
+
+DISPOSITIONS = ("expected", "deviation", "unknown")
+
+# ── check 名 ─────────────────────────────────────────────────────
+
+CHECK_ACTION_STARTED = "action-started"
+CHECK_TRANSCRIPTION_STARTED = "transcription-started"
+CHECK_WRITER_PREFIX = "writer-"
+CHECK_REQUESTED_OUTPUTS = "requested-outputs"
+CHECK_PUBLICATION_OUTCOME = "publication-outcome"
+CHECK_COST_RECEIPT = "cost-receipt"
+TERMINAL_CHECK_ID = CHECK_PUBLICATION_OUTCOME
+
+# ── writer 角色 ──────────────────────────────────────────────────
+
+ROLE_ORIGINAL = "original"
+ROLE_TRANSLATED = "translated"
+ROLE_BILINGUAL = "bilingual"
+ROLES = (ROLE_ORIGINAL, ROLE_TRANSLATED, ROLE_BILINGUAL)
+
+# ── 请求模式 ─────────────────────────────────────────────────────
+
+MODE_ORIGINAL_ONLY = "original_only"
+MODE_TRANSLATED = "translated_and_bilingual"
+
+# ── 结果词 ───────────────────────────────────────────────────────
+
+EXPECTED_ORIGINAL_CURRENT = "original_current"
+EXPECTED_ALL_CURRENT = "original_translated_bilingual_current"
+EXPECTED_REUSED = "reused_existing"
+
+ACTUAL_PREVIOUS_TRANSLATIONS = "previous_translations_only"
+ACTUAL_MISSING_TRANSLATIONS = "missing_translations"
+ACTUAL_PARTIAL = "partial_current"
+ACTUAL_WRITE_FAILED = "write_failed"
+ACTUAL_TRANSCRIPTION_FAILED = "transcription_failed"
+ACTUAL_TRANSLATION_FAILED = "translation_failed"
+
+PUBLISHED_CURRENT = "published_current"
+PUBLISHED_PARTIAL = "published_partial"
+PUBLICATION_COMPLETED = "publication_completed"
+
+WRITER_COMMITTED = "committed_this_round"
+WRITER_NOT_REQUESTED = "not_requested"
+WRITER_PREVIOUS_KEPT = "previous_kept"
+WRITER_ABSENT = "absent"
+WRITER_FAILED = "failed"
+
+ENGINE_STARTED = "engine_started"
+ENGINE_NOT_STARTED = "engine_not_started"
+
+COST_UNKNOWN = "cost_unknown"
+
+# ── 阶段 ─────────────────────────────────────────────────────────
+
+STAGE_TRANSCRIPTION = "transcription"
+STAGE_TRANSLATION = "translation"
+STAGE_OUTPUT = "output"
+
+MAX_ERROR_MESSAGE = 500
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str) and value != ""
+
+
+def now() -> str:
+    """本轮运行的 UTC 时间戳（秒精度）。"""
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def input_identity(path: Any) -> str:
+    """一个输入文件的稳定、不透明身份。
+
+    身份由解析后的路径散列而来：同一文件在重投时沿用原身份，而同一批里
+    两个同名但来源不同的音频仍然可区分。路径本身不离开本仓。
+    """
+    try:
+        resolved = str(Path(path).resolve())
+    except OSError:
+        resolved = str(path)
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+
+
+def step_id_for(input_id: str) -> str:
+    """一次操作的 step 身份。"""
+    return f"meeting-operation/{input_id}"
+
+
+def evidence_ref_for(input_id: str, role: Optional[str] = None) -> str:
+    """本仓能解释的逻辑证据引用。"""
+    if role:
+        return f"mc-output/{input_id}/{role}"
+    return f"mc-output/{input_id}"
+
+
+def _observation_identity(record: Mapping[str, Any]) -> Tuple[str, ...]:
+    """一行观察的去重身份：位置 + 内容。"""
+    return (
+        str(record.get("owner", "")),
+        str(record.get("run_id", "")),
+        str(record.get("attempt_id", "")),
+        str(record.get("step_id", "")),
+        str(record.get("check_id", "")),
+        str(record.get("expected", "")),
+        str(record.get("actual", "")),
+        str(record.get("disposition", "")),
+    )
+
+
+def _details_identity(record: Mapping[str, Any]) -> str:
+    """一条 details 记录的内容身份。"""
+    raw = json.dumps(
+        record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return "fb-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_jsonl(path: Path) -> List[dict]:
+    """读取一个 JSONL 文件；读不到或不是 JSON 行时不给记录。"""
+    try:
+        if not path.is_file():
+            return []
+        raw = path.read_bytes()
+    except OSError:
+        return []
+    records: List[dict] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+class FeedbackRecorder:
+    """一次运行的单写者、只追加的 JSONL 落点。
+
+    写失败永远不抛异常：它被记在 ``write_failures`` 与 ``diagnostics`` 上，
+    调用方保留自己的退出码、结果与重试行为。
+    """
+
+    def __init__(
+        self,
+        out_path: Any,
+        *,
+        run_id: str,
+        attempt_id: str,
+        version: str = ADAPTER_VERSION,
+        owner: str = OWNER,
+        details_path: Any = None,
+        sink: Any = None,
+        details_sink: Any = None,
+    ) -> None:
+        self.out_path = Path(out_path)
+        self.details_path = (
+            Path(details_path)
+            if details_path is not None
+            else self.out_path.with_name(self.out_path.name + ".details.jsonl")
+        )
+        self.diagnostics_path = self.out_path.with_name(
+            self.out_path.name + ".diagnostics.jsonl"
+        )
+        self.run_id = run_id
+        self.attempt_id = attempt_id
+        self.version = version
+        self.owner = owner
+        # 注入的 sink 取代文件本身，用来在不改宿主权限模型的前提下演练
+        # 一个写不进去的目的地。
+        self._sink = sink
+        self._details_sink = details_sink
+        self.write_failures = 0
+        self.diagnostics: List[str] = []
+        self._written: set = set()
+        self._details_written: set = set()
+        self._scan_existing()
+
+    # ── 读回上一轮已经写下的内容 ──────────────────────────────────
+
+    def _scan_existing(self) -> None:
+        for record in _read_jsonl(self.out_path):
+            if "check_id" in record:
+                self._written.add(_observation_identity(record))
+        for record in _read_jsonl(self.details_path):
+            identifier = record.get("details_id")
+            if isinstance(identifier, str):
+                self._details_written.add(identifier)
+
+    # ── 写 ────────────────────────────────────────────────────────
+
+    def record(
+        self,
+        *,
+        step_id: str,
+        check_id: str,
+        expected: str,
+        actual: str,
+        disposition: Optional[str] = None,
+        issue_key: Optional[str] = None,
+        evidence_ref: Optional[str] = None,
+        details: Optional[Mapping[str, Any]] = None,
+        parent_step_id: Optional[str] = None,
+        origin_owner: Optional[str] = None,
+        terminal_check_id: Optional[str] = None,
+    ) -> bool:
+        """追加一行观察。True 表示新的一行确实落盘了。"""
+        try:
+            return self._record(
+                step_id=step_id,
+                check_id=check_id,
+                expected=expected,
+                actual=actual,
+                disposition=disposition,
+                issue_key=issue_key,
+                evidence_ref=evidence_ref,
+                details=details,
+                parent_step_id=parent_step_id,
+                origin_owner=origin_owner,
+                terminal_check_id=terminal_check_id,
+            )
+        except Exception as exc:  # 防御：投影永远不成为业务失败的原因
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            return False
+
+    def _record(
+        self,
+        *,
+        step_id: str,
+        check_id: str,
+        expected: str,
+        actual: str,
+        disposition: Optional[str],
+        issue_key: Optional[str],
+        evidence_ref: Optional[str],
+        details: Optional[Mapping[str, Any]],
+        parent_step_id: Optional[str],
+        origin_owner: Optional[str],
+        terminal_check_id: Optional[str],
+    ) -> bool:
+        if not all(_is_str(value) for value in (step_id, check_id, expected, actual)):
+            self._note_failure("feedback_write_failed:invalid_observation")
+            return False
+        if disposition is None:
+            disposition = "expected" if expected == actual else "deviation"
+        if disposition not in DISPOSITIONS:
+            self._note_failure("feedback_write_failed:invalid_disposition")
+            return False
+
+        observation: Dict[str, Any] = {
+            "schema_version": OBSERVATION_SCHEMA,
+            "owner": self.owner,
+        }
+        if origin_owner and origin_owner != self.owner:
+            observation["origin_owner"] = origin_owner
+        observation.update(
+            {
+                "run_id": self.run_id,
+                "attempt_id": self.attempt_id,
+                "step_id": step_id,
+                "check_id": check_id,
+                "expected": expected,
+                "actual": actual,
+                "disposition": disposition,
+            }
+        )
+        if issue_key:
+            observation["issue_key"] = issue_key
+        if evidence_ref:
+            observation["evidence_ref"] = evidence_ref
+        observation["version"] = self.version
+        if parent_step_id:
+            observation["parent_step_id"] = parent_step_id
+        if terminal_check_id:
+            observation["terminal_check_id"] = terminal_check_id
+
+        identity = _observation_identity(observation)
+        if identity in self._written:
+            # 重投同一份结果：沿用原身份，不新增行。
+            return False
+
+        if details is not None:
+            detail_record = dict(details)
+            identifier = _details_identity(detail_record)
+            detail_record["details_id"] = identifier
+            if identifier not in self._details_written:
+                if self._append_jsonl(
+                    self.details_path, detail_record, sink=self._details_sink
+                ):
+                    self._details_written.add(identifier)
+            observation["details_ref"] = identifier
+
+        if not self._append_jsonl(self.out_path, observation, sink=self._sink):
+            # 这一行没有到达旁路：它在这里不留身份，之后的尝试仍可送达。
+            return False
+        self._written.add(identity)
+        return True
+
+    def _append_jsonl(
+        self, path: Path, record: Mapping[str, Any], *, sink: Any = None
+    ) -> bool:
+        """追加一行 JSON。False 表示这行没有落到目的地。"""
+        line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        if sink is not None:
+            try:
+                sink(line)
+            except Exception as exc:
+                self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+                return False
+            return True
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(line)
+        except OSError as exc:
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            return False
+        return True
+
+    def _note_failure(self, kind: str) -> None:
+        """记录一条不完整的诊断，供本仓自己的作业读取。
+
+        诊断留在 recorder 内存里和旁路旁边的 ``*.diagnostics.jsonl``；它不
+        走到 stdout 或 stderr，本仓业务契约因此完全不变。
+        """
+        self.write_failures += 1
+        self.diagnostics.append(kind)
+        try:
+            self.diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.diagnostics_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "run_id": self.run_id,
+                            "attempt_id": self.attempt_id,
+                            "diagnostic": kind,
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+        except OSError:
+            pass
+
+
+# ── 进程内 recorder ──────────────────────────────────────────────
+
+_RECORDERS: Dict[Tuple[str, str, str], FeedbackRecorder] = {}
+_LAST_RECORDER: Optional[FeedbackRecorder] = None
+
+
+def recorder_from_env(
+    environ: Optional[Mapping[str, str]] = None,
+) -> Optional[FeedbackRecorder]:
+    """本进程的 recorder；没有指定旁路目的地时返回 None。
+
+    目的地由宿主通过 ``RESEARCH_FEEDBACK_OUT`` 指定；运行与尝试身份可以由
+    宿主通过 ``RESEARCH_FEEDBACK_RUN_ID`` / ``RESEARCH_FEEDBACK_ATTEMPT_ID``
+    提供。宿主没有提供运行时身份时，本进程自成一个运行。
+    """
+    global _LAST_RECORDER
+
+    env = os.environ if environ is None else environ
+    raw = env.get(FEEDBACK_OUT_ENV)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    out = raw.strip()
+    run_id = env.get(FEEDBACK_RUN_ID_ENV)
+    if not _is_str(run_id):
+        run_id = "run-" + uuid.uuid4().hex[:12]
+    attempt_id = env.get(FEEDBACK_ATTEMPT_ID_ENV)
+    if not _is_str(attempt_id):
+        attempt_id = "attempt-1"
+
+    key = (out, run_id, attempt_id)
+    recorder = _RECORDERS.get(key)
+    if recorder is None:
+        recorder = FeedbackRecorder(out, run_id=run_id, attempt_id=attempt_id)
+        _RECORDERS[key] = recorder
+    _LAST_RECORDER = recorder
+    return recorder
+
+
+def current_recorder() -> Optional[FeedbackRecorder]:
+    """本进程最近一次的 recorder；没有启用旁路时为 None。"""
+    return _LAST_RECORDER
+
+
+def reset_state() -> None:
+    """清空进程内的 recorder 缓存（测试与独立重放使用）。"""
+    global _LAST_RECORDER
+
+    _RECORDERS.clear()
+    _LAST_RECORDER = None
+
+
+# ── 一次操作的投影 ───────────────────────────────────────────────
+
+
+class OperationFeedback:
+    """一次转录操作在旁路上的投影。
+
+    没有启用旁路时，所有方法都是空操作：业务代码不需要为它写分支。
+    """
+
+    def __init__(
+        self,
+        recorder: Optional[FeedbackRecorder],
+        *,
+        input_id: str,
+        audio_path: Any,
+        output_dir: Any,
+        requested_mode: str,
+        force: bool,
+    ) -> None:
+        self._recorder = recorder
+        self.input_id = input_id
+        self.step_id = step_id_for(input_id)
+        self.audio_path = Path(audio_path)
+        self.output_dir = Path(output_dir)
+        self.requested_mode = requested_mode
+        self.force = bool(force)
+        self._writers: Dict[str, Dict[str, Any]] = {}
+        self._errors: List[Dict[str, Any]] = []
+        self._engine_started = False
+        self._stage = STAGE_TRANSCRIPTION
+        self._aborted = False
+        self._reused: Optional[Dict[str, Any]] = None
+        self._finished = False
+
+    # ── 事实 ──────────────────────────────────────────────────────
+
+    def set_stage(self, stage: str) -> None:
+        """记录当前处于哪个阶段（用于区分终态的失败原因）。"""
+        self._stage = stage
+
+    def note_engine_started(self) -> None:
+        """引擎即将被调用。"""
+        self._engine_started = True
+        self._emit_transcription_started(ENGINE_STARTED)
+
+    def note_engine_not_started(self) -> None:
+        """本轮没有调用引擎（命中已有原件的跳过规则）。"""
+        self._engine_started = False
+        self._emit_transcription_started(ENGINE_NOT_STARTED)
+
+    def note_writer_committed(self, role: str, path: Any) -> None:
+        """某个 writer 本轮成功替换了目标文件。"""
+        self._writers[role] = self._writer_entry(
+            role, WRITER_COMMITTED, path, this_round=True
+        )
+
+    def note_writer_failed(self, role: str, path: Any, error: BaseException) -> None:
+        """某个 writer 抛错；目标文件保留旧字节。"""
+        self._writers[role] = self._writer_entry(
+            role, WRITER_FAILED, path, this_round=False
+        )
+        self._errors.append(
+            {
+                "role": role,
+                "error_type": type(error).__name__,
+                "message": str(error)[:MAX_ERROR_MESSAGE],
+            }
+        )
+
+    def note_writer_not_requested(self, role: str) -> None:
+        """本轮的模式没有要求这个角色。"""
+        self._writers[role] = {
+            "role": role,
+            "result": WRITER_NOT_REQUESTED,
+            "this_round": False,
+            "path": None,
+            "sha256": None,
+            "bytes": None,
+        }
+
+    def note_writer_not_produced(self, role: str, path: Any) -> None:
+        """本轮没有产出这个角色：旧件仍在或根本没有。"""
+        exists = Path(path).exists()
+        self._writers[role] = self._writer_entry(
+            role,
+            WRITER_PREVIOUS_KEPT if exists else WRITER_ABSENT,
+            path,
+            this_round=False,
+        )
+
+    def note_reuse(self, reused: Mapping[str, Any]) -> None:
+        """本轮没有产出任何东西：复用了已有产物。"""
+        self._reused = dict(reused)
+
+    def note_abort(self) -> None:
+        """本轮被异常中止：终态是失败，不是部分完成。"""
+        self._aborted = True
+
+    def note_error(self, error: BaseException) -> None:
+        """记录本轮的一个原始异常（本仓自己保留细节）。
+
+        同一个异常只记一次：writer 失败已经按角色记过，顶层不再重复。
+        """
+        entry = {
+            "role": None,
+            "error_type": type(error).__name__,
+            "message": str(error)[:MAX_ERROR_MESSAGE],
+        }
+        for existing in self._errors:
+            if (
+                existing["error_type"] == entry["error_type"]
+                and existing["message"] == entry["message"]
+            ):
+                return
+        self._errors.append(entry)
+
+    # ── 观察 ──────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """记录操作开始——它发生在结果可能出现之前。"""
+        if self._recorder is None:
+            return
+        self._recorder.record(
+            step_id=self.step_id,
+            check_id=CHECK_ACTION_STARTED,
+            expected="started",
+            actual="started",
+            disposition="expected",
+            evidence_ref=evidence_ref_for(self.input_id),
+            terminal_check_id=TERMINAL_CHECK_ID,
+            details=self._details_payload("started"),
+        )
+
+    def finish(self, metrics: Optional[Mapping[str, Any]] = None) -> None:
+        """记录本轮终态。"""
+        if self._finished:
+            return
+        self._finished = True
+        recorder = self._recorder
+        if recorder is None:
+            return
+
+        details = self._details_payload("finished", metrics=metrics)
+        self._emit_writer_rows(details)
+
+        requested_expected = self._requested_expected()
+        requested_actual = self._requested_actual()
+        recorder.record(
+            step_id=self.step_id,
+            check_id=CHECK_REQUESTED_OUTPUTS,
+            expected=requested_expected,
+            actual=requested_actual,
+            disposition="expected" if requested_expected == requested_actual else "deviation",
+            evidence_ref=evidence_ref_for(self.input_id),
+            details=details,
+        )
+
+        outcome = self._publication_actual()
+        recorder.record(
+            step_id=self.step_id,
+            check_id=CHECK_PUBLICATION_OUTCOME,
+            expected=PUBLICATION_COMPLETED,
+            actual=outcome,
+            disposition=(
+                "expected"
+                if outcome in (PUBLISHED_CURRENT, EXPECTED_REUSED)
+                else "deviation"
+            ),
+            evidence_ref=evidence_ref_for(self.input_id),
+            details=details,
+        )
+
+        recorder.record(
+            step_id=self.step_id,
+            check_id=CHECK_COST_RECEIPT,
+            expected=COST_UNKNOWN,
+            actual=COST_UNKNOWN,
+            disposition="unknown",
+            evidence_ref=evidence_ref_for(self.input_id),
+            details=details,
+        )
+
+    # ── 内部 ──────────────────────────────────────────────────────
+
+    def _emit_transcription_started(self, actual: str) -> None:
+        if self._recorder is None:
+            return
+        self._recorder.record(
+            step_id=self.step_id,
+            check_id=CHECK_TRANSCRIPTION_STARTED,
+            expected=actual,
+            actual=actual,
+            disposition="expected",
+            evidence_ref=evidence_ref_for(self.input_id),
+            details=self._details_payload("started"),
+        )
+
+    def _emit_writer_rows(self, details: Mapping[str, Any]) -> None:
+        if self._recorder is None:
+            return
+        for role in ROLES:
+            entry = self._writers.get(role)
+            if entry is None:
+                continue
+            expected = self._writer_expected(role)
+            actual = entry["result"]
+            self._recorder.record(
+                step_id=self.step_id,
+                check_id=f"{CHECK_WRITER_PREFIX}{role}",
+                expected=expected,
+                actual=actual,
+                disposition="expected" if expected == actual else "deviation",
+                evidence_ref=evidence_ref_for(self.input_id, role),
+                details=details,
+            )
+
+    def _writer_expected(self, role: str) -> str:
+        if role == ROLE_ORIGINAL:
+            return WRITER_COMMITTED
+        if self.requested_mode == MODE_ORIGINAL_ONLY:
+            return WRITER_NOT_REQUESTED
+        return WRITER_COMMITTED
+
+    def _requested_expected(self) -> str:
+        if self._reused is not None:
+            return EXPECTED_REUSED
+        if self.requested_mode == MODE_ORIGINAL_ONLY:
+            return EXPECTED_ORIGINAL_CURRENT
+        return EXPECTED_ALL_CURRENT
+
+    def _requested_actual(self) -> str:
+        if self._reused is not None:
+            return EXPECTED_REUSED
+        original = self._writers.get(ROLE_ORIGINAL, {}).get("result")
+        if original != WRITER_COMMITTED:
+            if self._stage == STAGE_TRANSCRIPTION:
+                return ACTUAL_TRANSCRIPTION_FAILED
+            if self._stage == STAGE_TRANSLATION:
+                return ACTUAL_TRANSLATION_FAILED
+            return ACTUAL_WRITE_FAILED
+        if self.requested_mode == MODE_ORIGINAL_ONLY:
+            return EXPECTED_ORIGINAL_CURRENT
+        translated = self._writers.get(ROLE_TRANSLATED, {}).get("result")
+        bilingual = self._writers.get(ROLE_BILINGUAL, {}).get("result")
+        if translated == WRITER_COMMITTED and bilingual == WRITER_COMMITTED:
+            return EXPECTED_ALL_CURRENT
+        not_produced = (WRITER_PREVIOUS_KEPT, WRITER_ABSENT)
+        if translated in not_produced and bilingual in not_produced:
+            if WRITER_PREVIOUS_KEPT in (translated, bilingual):
+                return ACTUAL_PREVIOUS_TRANSLATIONS
+            return ACTUAL_MISSING_TRANSLATIONS
+        return ACTUAL_PARTIAL
+
+    def _publication_actual(self) -> str:
+        if self._reused is not None:
+            return EXPECTED_REUSED
+        if self._aborted:
+            # 本轮被异常中止：终态是失败，不是部分完成。
+            if self._stage == STAGE_TRANSCRIPTION:
+                return ACTUAL_TRANSCRIPTION_FAILED
+            if self._stage == STAGE_TRANSLATION:
+                return ACTUAL_TRANSLATION_FAILED
+            return ACTUAL_WRITE_FAILED
+        requested = self._requested_actual()
+        if requested in (
+            ACTUAL_TRANSCRIPTION_FAILED,
+            ACTUAL_TRANSLATION_FAILED,
+            ACTUAL_WRITE_FAILED,
+        ):
+            return requested
+        if requested == self._requested_expected():
+            return PUBLISHED_CURRENT
+        return PUBLISHED_PARTIAL
+
+    def _writer_entry(
+        self, role: str, result: str, path: Any, *, this_round: bool
+    ) -> Dict[str, Any]:
+        target = Path(path)
+        exists = target.exists()
+        return {
+            "role": role,
+            "result": result,
+            "this_round": this_round,
+            "path": str(target),
+            "sha256": _file_digest(target) if exists else None,
+            "bytes": _file_size(target) if exists else None,
+        }
+
+    def _details_payload(
+        self, phase: str, metrics: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """本仓自己的一条步骤日志：不含逐字稿正文，不含凭证。"""
+        payload: Dict[str, Any] = {
+            "schema_version": DETAIL_SCHEMA,
+            "phase": phase,
+            "input_id": self.input_id,
+            "step_id": self.step_id,
+            "requested_mode": self.requested_mode,
+            "force": self.force,
+            "input_path": str(self.audio_path),
+            "output_dir": str(self.output_dir),
+            "projection_version": ADAPTER_VERSION,
+            "recorded_at": now(),
+        }
+        if phase == "finished":
+            payload["engine_started"] = self._engine_started
+            payload["writers"] = [
+                self._writers[role] for role in ROLES if role in self._writers
+            ]
+            payload["errors"] = list(self._errors)
+            payload["metrics"] = dict(metrics or {})
+            payload["outcome"] = self._publication_actual()
+            if self._reused is not None:
+                payload["reused_outputs"] = dict(self._reused)
+        return payload
+
+
+def _file_digest(path: Path) -> Optional[str]:
+    """一个文件的 sha256；读不到时为 None。"""
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _file_size(path: Path) -> Optional[int]:
+    """一个文件的字节数；读不到时为 None。"""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
+def begin_operation(
+    *,
+    audio_path: Any,
+    output_dir: Any,
+    translate_requested: bool,
+    force: bool,
+    environ: Optional[Mapping[str, str]] = None,
+) -> OperationFeedback:
+    """开始一次转录操作的反馈投影。
+
+    没有启用旁路时返回一个空操作对象：调用方不需要为它写任何分支。
+    """
+    recorder = recorder_from_env(environ)
+    mode = MODE_TRANSLATED if translate_requested else MODE_ORIGINAL_ONLY
+    return OperationFeedback(
+        recorder,
+        input_id=input_identity(audio_path),
+        audio_path=audio_path,
+        output_dir=output_dir,
+        requested_mode=mode,
+        force=force,
+    )
