@@ -1,0 +1,11 @@
+# 基线 b43a76a 上翻译失败时的真实行为：退出 0、译文保留上一版字节
+# 命令：在基线 worktree 里运行 core.transcribe_one，翻译器抛 TranslationError
+# 说明：基线没有任何反馈适配器，因此外部无法分辨这一轮是否产出了译文。
+
+return_value_is_not_none: True
+translation_file_kept_previous_bytes: True
+bilingual_file_kept_previous_bytes: True
+original_is_this_round: True
+sidecar_capability_in_repo: False
+process_exit_code: 0 (no exception raised)
+翻译失败，跳过翻译文件: 翻译失败

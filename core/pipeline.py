@@ -145,6 +145,7 @@ def transcribe_one(
             }
         )
         feedback.finish()
+        feedback.flush()
         return None
 
     logger.info(f"\n{'=' * 60}")
@@ -154,124 +155,131 @@ def transcribe_one(
     total_timer = Timer()
     metrics = TranscribeMetrics(filename=audio_path.name)
 
-    with total_timer:
-        with Timer() as stt_timer:
-            feedback.set_stage(STAGE_TRANSCRIPTION)
-            feedback.note_engine_started()
-            try:
+    try:
+        with total_timer:
+            with Timer() as stt_timer:
+                feedback.set_stage(STAGE_TRANSCRIPTION)
+                feedback.note_engine_started()
                 result = engine.transcribe(
                     str(audio_path), language=language, initial_prompt=initial_prompt
                 )
-            except Exception as exc:
-                _fail(feedback, exc, metrics)
-                raise
-            lang, lang_prob, duration = (
-                result.language,
-                result.language_probability,
-                result.duration,
-            )
-            logger.info(f"语言: {lang} ({lang_prob:.1%})  时长: {fmt_ts(duration)}")
-
-            if result.paragraph_level:
-                paragraphs = result.segments
-            else:
-                logger.info("合并段落...")
-                paragraphs = merge_into_paragraphs(
-                    result.segments,
-                    gap_threshold=merge_gap_sec,
-                    max_chars=paragraph_max_chars,
+                lang, lang_prob, duration = (
+                    result.language,
+                    result.language_probability,
+                    result.duration,
                 )
-        metrics.stt_elapsed = stt_timer.elapsed
-        metrics.duration = duration
-        logger.info(f"转写完成: {len(paragraphs)} 段, {stt_timer.elapsed:.1f}秒")
+                logger.info(f"语言: {lang} ({lang_prob:.1%})  时长: {fmt_ts(duration)}")
 
-        # 翻译
-        translations = None
-        translation_failed = False
-        if translator_obj:
-            logger.info(
-                f"\n翻译中 (DeepSeek {translator_obj.model}, "
-                f"公司: {company_context.split(chr(10))[0] if company_context else '无'})"
-            )
-            feedback.set_stage(STAGE_TRANSLATION)
-            with Timer() as trans_timer:
-                try:
-                    translations = translator_obj.translate_paragraphs(
-                        [para.text for para in paragraphs],
-                        company_context=company_context,
-                        corrections=corrections,
-                        progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
-                    )
-                except TranslationError as e:
-                    logger.warning(f"翻译失败，跳过翻译文件: {e}")
-                    translations = None
-                    translation_failed = True
-                except Exception as e:
-                    _fail(feedback, e, metrics)
-                    raise
-            metrics.translate_elapsed = trans_timer.elapsed
-            if translations is not None:
-                logger.info(f"翻译完成: {trans_timer.elapsed:.1f}秒")
-
-        # 输出
-        meta = {
-            "filename": audio_path.name,
-            "language": lang,
-            "language_prob": lang_prob,
-            "duration": duration,
-            "elapsed": metrics.stt_elapsed,
-            "company_name": company_context.split("\n")[0] if company_context else "",
-            "translator_model": translator_obj.model if translator_obj else "N/A",
-        }
-
-        with Timer() as output_timer:
-            feedback.set_stage(STAGE_OUTPUT)
-            orig = output_dir / f"{stem}_原文.txt"
-            try:
-                write_original(orig, paragraphs, meta, timestamps)
-            except Exception as exc:
-                feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
-                _fail(feedback, exc, metrics)
-                raise
-            feedback.note_writer_committed(ROLE_ORIGINAL, orig)
-            logger.info(f"  原文: {orig}")
-
-            if translations is None:
-                logger.info("  未启用翻译，跳过翻译和中英对照文件")
-                if translation_failed:
-                    # 本轮没有产出译文与对照：旧件仍在，或根本没有。
-                    feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
-                    feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                if result.paragraph_level:
+                    paragraphs = result.segments
                 else:
-                    feedback.note_writer_not_requested(ROLE_TRANSLATED)
-                    feedback.note_writer_not_requested(ROLE_BILINGUAL)
-            else:
-                tr = output_dir / f"{stem}_翻译.txt"
-                try:
-                    write_translated(tr, paragraphs, translations, meta, timestamps)
-                except Exception as exc:
-                    feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
-                    _fail(feedback, exc, metrics)
-                    raise
-                feedback.note_writer_committed(ROLE_TRANSLATED, tr)
-                logger.info(f"  翻译: {tr}")
+                    logger.info("合并段落...")
+                    paragraphs = merge_into_paragraphs(
+                        result.segments,
+                        gap_threshold=merge_gap_sec,
+                        max_chars=paragraph_max_chars,
+                    )
+            metrics.stt_elapsed = stt_timer.elapsed
+            metrics.duration = duration
+            logger.info(f"转写完成: {len(paragraphs)} 段, {stt_timer.elapsed:.1f}秒")
 
-                bi = output_dir / f"{stem}_中英对照.txt"
-                try:
-                    write_bilingual(bi, paragraphs, translations, meta, timestamps)
-                except Exception as exc:
-                    feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
-                    _fail(feedback, exc, metrics)
-                    raise
-                feedback.note_writer_committed(ROLE_BILINGUAL, bi)
-                logger.info(f"  对照: {bi}")
-        metrics.output_elapsed = output_timer.elapsed
+            # 翻译
+            translations = None
+            translation_failed = False
+            if translator_obj:
+                logger.info(
+                    f"\n翻译中 (DeepSeek {translator_obj.model}, "
+                    f"公司: {company_context.split(chr(10))[0] if company_context else '无'})"
+                )
+                feedback.set_stage(STAGE_TRANSLATION)
+                with Timer() as trans_timer:
+                    try:
+                        translations = translator_obj.translate_paragraphs(
+                            [para.text for para in paragraphs],
+                            company_context=company_context,
+                            corrections=corrections,
+                            progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
+                        )
+                    except TranslationError as e:
+                        logger.warning(f"翻译失败，跳过翻译文件: {e}")
+                        translations = None
+                        translation_failed = True
+                metrics.translate_elapsed = trans_timer.elapsed
+                if translations is not None:
+                    logger.info(f"翻译完成: {trans_timer.elapsed:.1f}秒")
 
-    metrics.total_elapsed = total_timer.elapsed
-    metrics.paragraphs = len(paragraphs)
-    metrics.text_length = sum(len(para.text) for para in paragraphs)
-    logger.info(f"性能: {metrics.summary()}")
-    feedback.finish(_metric_snapshot(metrics))
+            # 输出
+            meta = {
+                "filename": audio_path.name,
+                "language": lang,
+                "language_prob": lang_prob,
+                "duration": duration,
+                "elapsed": metrics.stt_elapsed,
+                "company_name": company_context.split("\n")[0] if company_context else "",
+                "translator_model": translator_obj.model if translator_obj else "N/A",
+            }
+
+            with Timer() as output_timer:
+                feedback.set_stage(STAGE_OUTPUT)
+                orig = output_dir / f"{stem}_原文.txt"
+                try:
+                    write_original(orig, paragraphs, meta, timestamps)
+                except Exception as exc:
+                    feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
+                    raise
+                feedback.note_writer_committed(ROLE_ORIGINAL, orig)
+                logger.info(f"  原文: {orig}")
+
+                if translations is None:
+                    logger.info("  未启用翻译，跳过翻译和中英对照文件")
+                    if translation_failed:
+                        # 本轮没有产出译文与对照：旧件仍在，或根本没有。
+                        feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
+                        feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                    else:
+                        feedback.note_writer_not_requested(ROLE_TRANSLATED)
+                        feedback.note_writer_not_requested(ROLE_BILINGUAL)
+                else:
+                    tr = output_dir / f"{stem}_翻译.txt"
+                    try:
+                        write_translated(tr, paragraphs, translations, meta, timestamps)
+                    except Exception as exc:
+                        feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
+                        raise
+                    feedback.note_writer_committed(ROLE_TRANSLATED, tr)
+                    logger.info(f"  翻译: {tr}")
+
+                    bi = output_dir / f"{stem}_中英对照.txt"
+                    try:
+                        write_bilingual(bi, paragraphs, translations, meta, timestamps)
+                    except Exception as exc:
+                        feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
+                        raise
+                    feedback.note_writer_committed(ROLE_BILINGUAL, bi)
+                    logger.info(f"  对照: {bi}")
+            metrics.output_elapsed = output_timer.elapsed
+
+        metrics.total_elapsed = total_timer.elapsed
+        metrics.paragraphs = len(paragraphs)
+        metrics.text_length = sum(len(para.text) for para in paragraphs)
+        logger.info(f"性能: {metrics.summary()}")
+        feedback.finish(_metric_snapshot(metrics))
+    except Exception as exc:
+        # 异常终态是可知的：按阶段给出失败原因。
+        feedback.note_abort()
+        feedback.note_error(exc)
+        feedback.finish(_metric_snapshot(metrics))
+        raise
+    except BaseException as exc:
+        # 被中止：没有可信终态，终态保留 unknown。
+        feedback.mark_unknown()
+        feedback.note_error(exc)
+        feedback.finish(_metric_snapshot(metrics))
+        raise
+    finally:
+        # 此刻没有任何计时器打开：旁路自身的写入耗时不进任何被发布的字段，
+        # 启用与禁用两次运行的产物字节因此一致。
+        feedback.flush()
 
     return {
         "input": str(audio_path),
@@ -298,10 +306,3 @@ def _metric_snapshot(metrics: TranscribeMetrics) -> dict:
         "total_elapsed": metrics.total_elapsed,
         "text_length": metrics.text_length,
     }
-
-
-def _fail(feedback, error: BaseException, metrics: TranscribeMetrics) -> None:
-    """本轮失败：先记录终态，再把原始异常继续抛给调用方。"""
-    feedback.note_abort()
-    feedback.note_error(error)
-    feedback.finish(_metric_snapshot(metrics))

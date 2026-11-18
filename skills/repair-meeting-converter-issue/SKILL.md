@@ -41,24 +41,37 @@ the consumer re-verification state.
 
 ## Reading the observation
 
-The sidecar rows carry stable result words; the numbers, paths, digests and the raw
-error stay in this repository's own `*.details.jsonl` step log. The step identity is
-`meeting-operation/<input_id>`; the evidence reference is `mc-output/<input_id>` or
-`mc-output/<input_id>/<role>`.
+The sidecar rows carry stable result words; the numbers, digests and the redacted
+error detail stay in this repository's own `*.details.jsonl` step log. The step
+identity is `meeting-operation/<input_id>`; the evidence reference is
+`mc-output/<input_id>` or `mc-output/<input_id>/<role>`.
 
-| check_id | actual words |
-|---|---|
-| `action-started` | `started`; pairs with `publication-outcome` through `terminal_check_id` |
-| `transcription-started` | `engine_started` / `engine_not_started` |
-| `writer-original` / `writer-translated` / `writer-bilingual` | `committed_this_round` / `not_requested` / `previous_kept` / `absent` / `failed` |
-| `requested-outputs` | `original_current` / `original_translated_bilingual_current` / `previous_translations_only` / `missing_translations` / `partial_current` / `reused_existing` / `write_failed` / `transcription_failed` / `translation_failed` |
-| `publication-outcome` | `published_current` / `published_partial` / `reused_existing` / `write_failed` / `transcription_failed` / `translation_failed` |
-| `cost-receipt` | `cost_unknown` — this repository has no usage receipt |
+| check_id | expected | actual words |
+|---|---|---|
+| `action-started` | `started` | `started`; pairs with `publication-outcome` through `terminal_check_id` |
+| `transcription-started` | the same word | `engine_started` / `engine_not_started` |
+| `writer-original` / `writer-translated` / `writer-bilingual` | `committed_this_round`, or `not_requested` when the mode did not ask for that role | `committed_this_round` / `not_requested` / `previous_kept` / `absent` / `failed` |
+| `requested-outputs` | the requested mode: `original_current`, `original_translated_bilingual_current` or `reused_existing` | `original_current` / `original_translated_bilingual_current` / `previous_translations_only` / `stale_and_missing_translations` / `missing_translations` / `partial_current` / `reused_existing` / `write_failed` / `transcription_failed` / `translation_failed` / `unknown` |
+| `publication-outcome` | `published_current`, or `reused_existing` when the skip rule applied | `published_current` / `published_partial` / `published_incomplete` / `reused_existing` / `write_failed` / `transcription_failed` / `translation_failed` / `unknown` |
+| `cost-receipt` | `cost_unknown` | `cost_unknown` — this repository has no usage receipt |
 
-`previous_translations_only` (the original is new, the translation is the previous
-version), `partial_current` (some requested targets were committed) and
-`original_current` (a successful original-only run) are three different facts and
-must never be collapsed into one another.
+Four situations must never be collapsed into one another:
+
+- `original_current` — a successful original-only run;
+- `previous_translations_only` / `stale_and_missing_translations` /
+  `missing_translations` — the original is new, the translation and the bilingual
+  file are the previous version (or absent);
+- `partial_current` — some requested targets were committed and another writer
+  failed;
+- `reused_existing` — the documented skip: this round produced nothing.
+
+`published_partial` (a writer failed) and `published_incomplete` (this round
+produced no translation at all) are two different terminal states.
+
+`expected` and `actual` differ exactly when the disposition is `deviation`, except
+for `cost-receipt`, which is `unknown` by construction, and for a terminal state of
+`unknown` — a run that was stopped without a credible terminal state. A start row
+without a matching terminal row also means: the terminal state is unknown.
 
 ## Procedure
 
@@ -182,11 +195,16 @@ Record in the card:
   the skip rule, the batch statistics, the CLI exit code and the stdout/stderr split
   are frozen. A repair states its effect on them explicitly.
 - The feedback sidecar is optional: enabling it must not change the return value, the
-  stdout, the stderr or the bytes of any output file. A sidecar write that fails never
-  changes the business outcome — the run keeps its own exit code, its own result and
-  its own retry behaviour, and the incomplete diagnostic is reported on the local
-  diagnostic channel only.
+  stdout, the stderr or the bytes of any output file. The sidecar's own write latency
+  must therefore stay outside every measured region — a repair that writes to the
+  sidecar inside a timed block changes the published timing and therefore the bytes
+  of the output files. A sidecar write that fails never changes the business outcome:
+  the run keeps its own exit code, its own result and its own retry behaviour, and
+  the incomplete diagnostic is reported on this repository's local diagnostic channel
+  (the logger) only.
 - Originals and formal run artefacts stay with their owner. The observation carries
-  only stable result words and opaque, credential-free references; the transcript
-  body, the raw exception, the absolute path and the credential stay in this
-  repository's own details record.
+  only stable result words and opaque, credential-free references. This repository's
+  own step log is redacted as well: no absolute path, no audio name, no transcript
+  body and no credential — only the native exception class, a redacted message, the
+  per-role digests and the metrics. The unredacted facts stay in the repository's
+  ordinary log output.

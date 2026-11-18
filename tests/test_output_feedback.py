@@ -48,9 +48,16 @@ OLD_BILINGUAL = "旧对照内容-不应出现在本轮产物中\n"
 
 @pytest.fixture(autouse=True)
 def _fresh_feedback_state():
-    """每个用例从干净的旁路状态开始（进程内缓存的 recorder 也要清）。"""
-    from core import feedback
+    """每个用例从干净的旁路状态开始（进程内缓存的 recorder 也要清）。
 
+    基线提交还没有本仓反馈适配器时，这里安静跳过，让 RED 落在行为断言上
+    而不是落在 import 错误上。
+    """
+    try:
+        from core import feedback
+    except ImportError:
+        yield
+        return
     feedback.reset_state()
     yield
     feedback.reset_state()
@@ -201,6 +208,30 @@ class TestObservationShape:
             assert reference.startswith("mc-output/")
             # 音频名里的主体信息留在本仓，不进入跨仓观察
             assert "meeting" not in reference
+
+    def test_details_record_carries_no_path_no_audio_name_and_no_raw_error(
+        self, engine, translator, tmp_path, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """本仓的步骤日志也是脱敏的：没有绝对路径、音频名与原始异常正文。"""
+        audio = tmp_path / "Xiaomi_Q3_Earnings_Call.mp3"
+        audio.write_bytes(b"\x00" * 1024)
+        monkeypatch.setattr(
+            "core.pipeline.write_bilingual",
+            lambda *a, **k: (_ for _ in ()).throw(OSError(f"写盘失败: {audio}")),
+        )
+        with pytest.raises(OSError):
+            transcribe_one(
+                engine, audio, tmp_output_dir, translator_obj=translator
+            )
+
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        blob = details.read_text(encoding="utf-8")
+        assert str(tmp_output_dir) not in blob
+        assert str(audio) not in blob
+        assert "Xiaomi" not in blob
+        # 异常类别保留，异常正文里的路径被脱敏
+        assert "OSError" in blob
+        assert "<path>" in blob
 
 
 # ── 正例 ─────────────────────────────────────────────────────────
@@ -353,7 +384,7 @@ class TestTranslationFailureKeepsStaleOutput:
         assert requested["disposition"] == "deviation"
 
         outcome = row_for(rows, "publication-outcome")
-        assert outcome["actual"] == "published_partial"
+        assert outcome["actual"] == "published_incomplete"
         assert outcome["disposition"] == "deviation"
 
     def test_missing_translations_are_distinguished_from_stale_ones(
@@ -514,6 +545,24 @@ class TestTranscriptionFailure:
         outcome = row_for(rows, "publication-outcome")
         assert outcome["actual"] == "transcription_failed"
 
+    def test_interrupted_run_keeps_the_terminal_state_unknown(
+        self, engine, audio_file, tmp_output_dir, sidecar
+    ):
+        """被中止时没有可信终态：终态保留 unknown，不编造成功。"""
+        engine.transcribe.side_effect = KeyboardInterrupt("作业被中止")
+        with pytest.raises(KeyboardInterrupt):
+            transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
+
+        rows = rows_of(sidecar, only_step(sidecar))
+        outcome = row_for(rows, "publication-outcome")
+        assert outcome["actual"] == "unknown"
+        assert outcome["disposition"] == "unknown"
+        requested = row_for(rows, "requested-outputs")
+        assert requested["actual"] == "unknown"
+        assert requested["disposition"] == "unknown"
+        # 本仓不因此重跑转录
+        assert engine.transcribe.call_count == 1
+
 
 # ── 旁路本身 ─────────────────────────────────────────────────────
 
@@ -526,10 +575,10 @@ class TestSidecarIsOptional:
     ):
         monkeypatch.delenv("RESEARCH_FEEDBACK_OUT", raising=False)
         target = tmp_output_dir.parent / "feedback.jsonl"
-        monkeypatch.setenv("RESEARCH_FEEDBACK_OUT", "")
         result = transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
         assert result is not None
         assert not target.exists()
+        assert not (tmp_output_dir.parent / "feedback.jsonl.details.jsonl").exists()
         assert sorted(p.name for p in tmp_output_dir.iterdir()) == ["meeting_原文.txt"]
 
     def test_unwritable_sidecar_keeps_the_business_outcome(
@@ -552,19 +601,82 @@ class TestSidecarIsOptional:
         assert translator.translate_paragraphs.call_count == 1
 
     def test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel(
-        self, engine, audio_file, tmp_output_dir, tmp_path, monkeypatch
+        self, engine, audio_file, tmp_output_dir, tmp_path, monkeypatch, caplog
     ):
-        from core import feedback
-
+        """旁路写不进去时，只在本仓已有的本地诊断通道上报告。"""
         blocked = tmp_path / "blocked"
         blocked.mkdir()
         monkeypatch.setenv("RESEARCH_FEEDBACK_OUT", str(blocked))
-        transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
+        with caplog.at_level("WARNING"):
+            transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
 
-        recorder = feedback.current_recorder()
-        assert recorder is not None
-        assert recorder.write_failures > 0
-        assert recorder.diagnostics
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("反馈旁路" in m for m in messages), messages
+
+    def test_malformed_sidecar_path_does_not_break_the_run(
+        self, engine, audio_file, tmp_output_dir, monkeypatch
+    ):
+        """目的地不合法时旁路不可用，但主任务照常完成。"""
+        monkeypatch.setenv("RESEARCH_FEEDBACK_OUT", "C:\\")
+        result = transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
+        assert result is not None
+        assert (tmp_output_dir / "meeting_原文.txt").exists()
+        assert engine.transcribe.call_count == 1
+
+    def test_sidecar_latency_does_not_enter_the_published_timing(
+        self, engine, translator, audio_file, tmp_output_dir, monkeypatch
+    ):
+        """旁路自己的写入耗时不进被发布的耗时，因此不改产物字节。"""
+        import time as _time
+
+        from core import feedback
+
+        delay = 0.2
+
+        def slow_sink(line):
+            _time.sleep(delay)
+
+        real_from_env = feedback.recorder_from_env
+
+        def patched(environ=None):
+            out = real_from_env(environ)
+            if out is not None:
+                out._sink = slow_sink
+            return out
+
+        monkeypatch.setattr("core.feedback.recorder_from_env", patched)
+        monkeypatch.setenv("RESEARCH_FEEDBACK_OUT", str(tmp_output_dir.parent / "slow.jsonl"))
+        monkeypatch.setenv("RESEARCH_FEEDBACK_RUN_ID", "run-1")
+        monkeypatch.setenv("RESEARCH_FEEDBACK_ATTEMPT_ID", "attempt-1")
+
+        result = transcribe_one(
+            engine, audio_file, tmp_output_dir, translator_obj=translator
+        )
+        # 旁路写了 8 行，每行阻塞 0.2 秒；若写发生在计时区间内，
+        # 总耗时会是秒级。
+        assert result is not None
+        assert result["elapsed"] < delay, result["elapsed"]
+
+    def test_run_id_is_stable_without_the_host_supplied_identity(
+        self, engine, tmp_path, monkeypatch
+    ):
+        """宿主不给运行身份时，同一进程的一批文件属于同一个运行。"""
+        monkeypatch.delenv("RESEARCH_FEEDBACK_RUN_ID", raising=False)
+        monkeypatch.delenv("RESEARCH_FEEDBACK_ATTEMPT_ID", raising=False)
+        sidecar = tmp_path / "run.jsonl"
+        monkeypatch.setenv("RESEARCH_FEEDBACK_OUT", str(sidecar))
+
+        out = tmp_path / "out"
+        out.mkdir()
+        first = tmp_path / "a.mp3"
+        second = tmp_path / "b.mp3"
+        first.write_bytes(b"\x00" * 1024)
+        second.write_bytes(b"\x00" * 1024)
+        transcribe_one(engine, first, out, translator_obj=None)
+        transcribe_one(engine, second, out, translator_obj=None)
+
+        runs = {r["run_id"] for r in read_rows(sidecar)}
+        assert len(runs) == 1, runs
 
     def test_enabled_and_disabled_runs_agree_on_everything_business(
         self, engine, translator, tmp_path, monkeypatch, fixed_timer, caplog
@@ -661,14 +773,24 @@ class TestObservationIdentity:
         first.write_bytes(b"\x00" * 1024)
         second.write_bytes(b"\x00" * 1024)
 
-        out = tmp_path / "out"
-        out.mkdir()
-        transcribe_one(engine, first, out, translator_obj=None)
-        transcribe_one(engine, second, out, translator_obj=None)
+        # 两个来源各自一个输出目录：两次都是真实转录，不是第二次命中跳过。
+        first_out = tmp_path / "out-a"
+        second_out = tmp_path / "out-b"
+        first_out.mkdir()
+        second_out.mkdir()
+        transcribe_one(engine, first, first_out, translator_obj=None)
+        transcribe_one(engine, second, second_out, translator_obj=None)
 
+        assert engine.transcribe.call_count == 2
         rows = read_rows(sidecar)
         steps = {r["step_id"] for r in rows}
         assert len(steps) == 2, "同名不同来源的音频必须可区分"
+        for step in steps:
+            step_rows = rows_of(sidecar, step)
+            assert row_for(step_rows, "transcription-started")["actual"] == "engine_started"
+            assert (
+                row_for(step_rows, "requested-outputs")["actual"] == "original_current"
+            )
 
     def test_redelivery_reuses_the_original_step_id(
         self, engine, audio_file, tmp_output_dir, sidecar

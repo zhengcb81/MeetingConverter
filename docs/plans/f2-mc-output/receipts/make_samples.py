@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -112,19 +113,41 @@ def scenario_stale(root: Path) -> Path:
 
 
 def scenario_started_only(root: Path) -> Path:
-    """引擎启动后被中止：只有开始行，没有可信终态。"""
+    """硬停止：只有开始行，没有可信终态。
+
+    子进程在转录途中用 ``os._exit`` 硬退出：``finally`` 不执行，缓冲里的行
+    来不及落盘，旁路因此只剩一条已经写下的开始行——这正是“停止后只有开始行
+    且没有可信终态”的真实形态。
+    """
     sidecar = root / "started-only.jsonl"
-    use_sidecar(sidecar, "mc-sample-started-only", "attempt-1")
     out = root / "out-started"
     out.mkdir()
     audio = root / "started.mp3"
     audio.write_bytes(b"\x00" * 1024)
-    engine = make_engine()
-    engine.transcribe.side_effect = KeyboardInterrupt("作业被中止")
-    try:
-        transcribe_one(engine, audio, out, translator_obj=None)
-    except KeyboardInterrupt:
-        pass
+    child = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from unittest.mock import MagicMock\n"
+        "from core import transcribe_one\n"
+        "engine = MagicMock()\n"
+        "def stop(*args, **kwargs):\n"
+        "    os._exit(9)\n"
+        "engine.transcribe.side_effect = stop\n"
+        f"transcribe_one(engine, Path({str(audio)!r}), Path({str(out)!r}), "
+        "translator_obj=None)\n"
+    )
+    environment = dict(os.environ)
+    environment["RESEARCH_FEEDBACK_OUT"] = str(sidecar)
+    environment["RESEARCH_FEEDBACK_RUN_ID"] = "mc-sample-started-only"
+    environment["RESEARCH_FEEDBACK_ATTEMPT_ID"] = "attempt-1"
+    completed = subprocess.run(
+        [sys.executable, "-c", child], env=environment, capture_output=True
+    )
+    if completed.returncode != 9:
+        raise SystemExit(
+            f"硬停止子进程意外退出：{completed.returncode}\n{completed.stderr.decode()}"
+        )
     return sidecar
 
 
