@@ -47,13 +47,20 @@ translation writers are simply not called.
 
 | scenario | attempt | step | expected | actual | disposition | evidence_ref |
 |---|---|---|---|---|---|---|
-| 翻译失败保留旧译文 | attempt-1 | mc-sample-stale | original_translated_bilingual_current | previous_translations_only | deviation | mc-output/73eca95d6ed6 |
-| 段数错配被 writer 拒绝 | attempt-1 | synthetic | original_translated_bilingual_current | partial_current | deviation | mc-output/<run-local> |
+| 翻译失败保留旧译文 | attempt-1 | mc-sample-stale | original_translated_bilingual_current | previous_translations_only | deviation | mc-output/aed69f880538 |
+| 段数错配被 writer 拒绝（**不在本 issue_key 覆盖范围**，责任层同但现象不同，另卡处理） | attempt-1 | synthetic | original_translated_bilingual_current | partial_current | deviation | mc-output/<run-local> |
 
 The occurrences above are the **pre-fix publication behaviour re-created** by
 suppressing the translation, so the projection observes the deviation itself. The
 defect itself was first observed by executing the flow at the base commit, before
 the projection existed (see the reproduction below).
+
+Scope of this issue key: `previous_translations_only` and
+`stale_and_missing_translations` — a previous version of the translation or the
+bilingual file really survived on disk, so the key applies and the cause is
+adjudicated. `missing_translations` (the translation step produced nothing and no
+previous file existed) shares the responsible layer but has no surviving old
+file to point at, so it carries no `issue_key` until its own card is opened.
 
 ## Reproduction
 

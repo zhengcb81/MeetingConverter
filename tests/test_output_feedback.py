@@ -403,6 +403,30 @@ class TestTranslationFailureKeepsStaleOutput:
         requested = row_for(rows, "requested-outputs")
         assert requested["actual"] == "missing_translations"
         assert requested["disposition"] == "deviation"
+        # 连上一版都没有：没有可指认的旧件，根因虽同但不带 issue_key
+        assert "issue_key" not in requested
+
+    def test_mixed_stale_and_missing_translations_are_named_exactly(
+        self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
+    ):
+        """旧译文在、旧对照不在：与“全旧”与“全缺”都不同，因此有专属结果词。"""
+        (tmp_output_dir / "meeting_原文.txt").write_text(OLD_ORIGINAL, encoding="utf-8")
+        (tmp_output_dir / "meeting_翻译.txt").write_text(OLD_TRANSLATION, encoding="utf-8")
+        transcribe_one(
+            engine,
+            audio_file,
+            tmp_output_dir,
+            translator_obj=failing_translator,
+            force=True,
+        )
+        rows = rows_of(sidecar, only_step(sidecar))
+        assert row_for(rows, "writer-translated")["actual"] == "previous_kept"
+        assert row_for(rows, "writer-bilingual")["actual"] == "absent"
+        requested = row_for(rows, "requested-outputs")
+        assert requested["actual"] == "stale_and_missing_translations"
+        assert requested["disposition"] == "deviation"
+        # 旧件确实留在了盘上，根因已确认
+        assert requested["issue_key"] == "stale-output-success"
 
     def test_sidecar_range_matches_the_old_bytes_on_disk(
         self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
@@ -464,6 +488,27 @@ class TestSegmentCountMismatch:
         assert requested["disposition"] == "deviation"
 
         outcome = row_for(rows, "publication-outcome")
+        # 原文已经提交，译文 writer 失败：终态是“部分提交”，不是“整体写入失败”
+        assert outcome["actual"] == "published_partial"
+        assert outcome["disposition"] == "deviation"
+
+    def test_original_write_failure_is_a_total_write_failure(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """一个目标都没提交时，终态才是 write_failed。"""
+
+        def boom(*args, **kwargs):
+            raise OSError("原文写盘失败")
+
+        monkeypatch.setattr("core.pipeline.write_original", boom)
+        with pytest.raises(OSError):
+            transcribe_one(
+                engine, audio_file, tmp_output_dir, translator_obj=translator
+            )
+
+        rows = rows_of(sidecar, only_step(sidecar))
+        assert row_for(rows, "writer-original")["actual"] == "failed"
+        outcome = row_for(rows, "publication-outcome")
         assert outcome["actual"] == "write_failed"
         assert outcome["disposition"] == "deviation"
 
@@ -495,7 +540,7 @@ class TestBilingualWriteFailure:
         requested = row_for(rows, "requested-outputs")
         assert requested["actual"] == "partial_current"
         outcome = row_for(rows, "publication-outcome")
-        assert outcome["actual"] == "write_failed"
+        assert outcome["actual"] == "published_partial"
 
     def test_force_failure_keeps_previous_bytes_and_records_the_terminal_state(
         self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
@@ -523,7 +568,7 @@ class TestBilingualWriteFailure:
 
         rows = rows_of(sidecar, only_step(sidecar))
         assert row_for(rows, "writer-bilingual")["actual"] == "failed"
-        assert row_for(rows, "publication-outcome")["actual"] == "write_failed"
+        assert row_for(rows, "publication-outcome")["actual"] == "published_partial"
         assert row_for(rows, "requested-outputs")["actual"] == "partial_current"
 
 
@@ -629,7 +674,9 @@ class TestSidecarIsOptional:
         """旁路自己的写入耗时不进被发布的耗时，因此不改产物字节。"""
         import time as _time
 
-        from core import feedback
+        # 这条是修复后的回归护栏，不是基线缺陷的复现：基线还没有本仓反馈
+        # 适配器，因此跳过而不是因 import 失败。
+        feedback = pytest.importorskip("core.feedback")
 
         delay = 0.2
 
@@ -917,6 +964,120 @@ class TestPublicEntryIntegration:
             requested = row_for(step_rows, "requested-outputs")
             assert requested["actual"] == "original_translated_bilingual_current"
             assert row_for(step_rows, "publication-outcome")["actual"] == "published_current"
+
+    def test_redaction_cuts_paths_but_keeps_ordinary_text(self):
+        """脱敏只吃真正的绝对路径，普通文本里的斜杠不受影响。"""
+        from core.feedback import scrub_text
+
+        for leaked in (
+            r"C:\Users\zzz\audio\meeting.mp3",
+            "D:/data/audio/meeting.mp3",
+            "\\\\fileserver\\share\\audio\\meeting.mp3",
+            "/home/user/audio/meeting.mp3",
+            "/etc/passwd",
+            "/root",
+            "error:/root/x",
+        ):
+            assert "<path>" in scrub_text(leaked), leaked
+            assert "meeting" not in scrub_text(leaked)
+
+        for prose in (
+            "a/b",
+            "and/or",
+            "2024/2025",
+            "成本/收入比",
+            "20%/30%",
+            "（/备注）",
+            "MD/PhD",
+            "12/25/2026",
+        ):
+            assert scrub_text(prose) == prose, prose
+
+    def test_details_ref_is_absent_when_the_details_never_landed(self, tmp_path):
+        """details 写不进去时不写 details_ref：不留下悬挂引用。"""
+        from core.feedback import FeedbackRecorder
+
+        out = tmp_path / "run.jsonl"
+
+        def refuse(line):
+            raise OSError("details 写不进去")
+
+        recorder = FeedbackRecorder(
+            out, run_id="run-1", attempt_id="a1", details_sink=refuse
+        )
+        wrote = recorder.record(
+            step_id="meeting-operation/x",
+            check_id="action-started",
+            expected="started",
+            actual="started",
+            details={"phase": "started", "input_id": "x"},
+        )
+        assert wrote
+        rows = read_rows(out)
+        assert len(rows) == 1
+        assert "details_ref" not in rows[0], rows[0]
+
+    def test_details_ref_is_present_when_the_details_did_land(self, tmp_path):
+        """details 正常落盘时才有 details_ref。"""
+        from core.feedback import FeedbackRecorder
+
+        out = tmp_path / "run.jsonl"
+        recorder = FeedbackRecorder(out, run_id="run-1", attempt_id="a1")
+        recorder.record(
+            step_id="meeting-operation/x",
+            check_id="action-started",
+            expected="started",
+            actual="started",
+            details={"phase": "started", "input_id": "x"},
+        )
+        rows = read_rows(out)
+        assert "details_ref" in rows[0]
+        details = out.with_name(out.name + ".details.jsonl")
+        assert details.exists()
+        assert rows[0]["details_ref"] == read_rows(details)[0]["details_id"]
+
+    def test_failure_path_records_real_elapsed_times(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """失败路径上耗时照样记账：消费方能区分立刻失败与干了一会儿才失败。"""
+        import time as _time
+
+        def slow_transcribe(*args, **kwargs):
+            _time.sleep(0.2)
+            raise RuntimeError("引擎干了一会儿才失败")
+
+        engine.transcribe.side_effect = slow_transcribe
+        with pytest.raises(RuntimeError):
+            transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=translator)
+
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        finished = [r for r in read_rows(details) if r.get("phase") == "finished"]
+        assert finished
+        metrics = finished[-1]["metrics"]
+        assert metrics["stt_elapsed"] >= 0.15, metrics
+        assert metrics["total_elapsed"] >= 0.15, metrics
+
+    def test_details_metrics_are_truthful_on_a_failure_path(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """失败路径上的步骤日志仍然说得清这一轮做了什么，不是一片 0。"""
+
+        def boom(*args, **kwargs):
+            raise OSError("对照写盘失败")
+
+        monkeypatch.setattr("core.pipeline.write_bilingual", boom)
+        with pytest.raises(OSError):
+            transcribe_one(
+                engine, audio_file, tmp_output_dir, translator_obj=translator
+            )
+
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        finished = [r for r in read_rows(details) if r.get("phase") == "finished"]
+        assert finished
+        metrics = finished[-1]["metrics"]
+        assert metrics["paragraphs"] == 2
+        assert metrics["text_length"] > 0
+        assert metrics["duration"] == 60.0
 
     def test_cost_is_unknown_without_a_usage_receipt(
         self, engine, audio_file, tmp_output_dir, sidecar

@@ -13,15 +13,15 @@
 # 说明：基线提交没有本仓反馈适配器（core/feedback.py），因此这些用例因
 # “一行观察都没有产生”而失败，而不是因 import 错误失败。
 #
-F.FF.FFFFFF.FFFFFFFF..F.FF..FF.FFF                                       [100%]
+F.FF.FFFFFF.FFFFFFFFFF..F.sF..FF.FFFFFFFF                                [100%]
 ================================== FAILURES ===================================
 _____ TestObservationShape.test_every_row_has_the_required_string_fields ______
 
-self = <test_output_feedback.TestObservationShape object at 0x000001F6258ED1D0>
-engine = <MagicMock id='2156708568704'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_every_row_has_the_require0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_every_row_has_the_require0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_every_row_has_the_require0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestObservationShape object at 0x0000015E71D1D1D0>
+engine = <MagicMock id='1505154047616'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_every_row_has_the_required_string_fields(self, engine, audio_file, tmp_output_dir, sidecar):
         transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
@@ -33,11 +33,11 @@ E       assert []
 tests\test_output_feedback.py:168: AssertionError
 ______ TestObservationShape.test_start_row_points_at_the_terminal_check _______
 
-self = <test_output_feedback.TestObservationShape object at 0x000001F625EBD220>
-engine = <MagicMock id='2156708573408'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_start_row_points_at_the_t0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_start_row_points_at_the_t0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_start_row_points_at_the_t0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestObservationShape object at 0x0000015E723C1350>
+engine = <MagicMock id='1505154052320'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_start_row_points_at_the_terminal_check(self, engine, audio_file, tmp_output_dir, sidecar):
         transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
@@ -60,13 +60,13 @@ E        +  where 0 = len([])
 tests\test_output_feedback.py:142: AssertionError
 _ TestObservationShape.test_observations_carry_no_transcript_body_or_credentials _
 
-self = <test_output_feedback.TestObservationShape object at 0x000001F625EBD480>
-engine = <MagicMock id='2156708573072'>
-translator = <MagicMock id='2156708574080'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_observations_carry_no_tra0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_observations_carry_no_tra0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_observations_carry_no_tra0/feedback/run-1.jsonl')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625ECDBF0>
+self = <test_output_feedback.TestObservationShape object at 0x0000015E723C15B0>
+engine = <MagicMock id='1505154051984'>
+translator = <MagicMock id='1505154052992'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E723D5F20>
 
     def test_observations_carry_no_transcript_body_or_credentials(
         self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
@@ -78,15 +78,15 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625ECDBF0>
 
 tests\test_output_feedback.py:198: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-C:\Miniconda\Lib\pathlib\_local.py:546: in read_text
+<ABS_PATH> in read_text
     return PathBase.read_text(self, encoding, errors, newline)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-C:\Miniconda\Lib\pathlib\_abc.py:632: in read_text
+<ABS_PATH> in read_text
     with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-self = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_observations_carry_no_tra0/feedback/run-1.jsonl')
+self = WindowsPath('<PYTEST_TMP>')
 mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
 
     def open(self, mode='r', buffering=-1, encoding=None,
@@ -99,18 +99,18 @@ mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
             encoding = io.text_encoding(encoding)
 >       return io.open(self, mode, buffering, encoding, errors, newline)
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E       FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\郑曾波\\AppData\\Local\\Temp\\pytest-of-郑曾波\\pytest-1775\\test_observations_carry_no_tra0\\feedback\\run-1.jsonl'
+E       FileNotFoundError: [Errno 2] No such file or directory: '<PYTEST_TMP>'
 
-C:\Miniconda\Lib\pathlib\_local.py:537: FileNotFoundError
+<ABS_PATH> FileNotFoundError
 _ TestObservationShape.test_details_record_carries_no_path_no_audio_name_and_no_raw_error _
 
-self = <test_output_feedback.TestObservationShape object at 0x000001F625ECC050>
-engine = <MagicMock id='2156708573408'>
-translator = <MagicMock id='2156708568704'>
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_details_record_carries_no0')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_details_record_carries_no0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_details_record_carries_no0/feedback/run-1.jsonl')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625D99150>
+self = <test_output_feedback.TestObservationShape object at 0x0000015E723D4050>
+engine = <MagicMock id='1505154054672'>
+translator = <MagicMock id='1505154055344'>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E7238A250>
 
     def test_details_record_carries_no_path_no_audio_name_and_no_raw_error(
         self, engine, translator, tmp_path, tmp_output_dir, sidecar, monkeypatch
@@ -133,15 +133,15 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625D99150>
 
 tests\test_output_feedback.py:228: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-C:\Miniconda\Lib\pathlib\_local.py:546: in read_text
+<ABS_PATH> in read_text
     return PathBase.read_text(self, encoding, errors, newline)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-C:\Miniconda\Lib\pathlib\_abc.py:632: in read_text
+<ABS_PATH> in read_text
     with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-self = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_details_record_carries_no0/feedback/run-1.jsonl.details.jsonl')
+self = WindowsPath('<PYTEST_TMP>')
 mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
 
     def open(self, mode='r', buffering=-1, encoding=None,
@@ -154,16 +154,16 @@ mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
             encoding = io.text_encoding(encoding)
 >       return io.open(self, mode, buffering, encoding, errors, newline)
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E       FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\郑曾波\\AppData\\Local\\Temp\\pytest-of-郑曾波\\pytest-1775\\test_details_record_carries_no0\\feedback\\run-1.jsonl.details.jsonl'
+E       FileNotFoundError: [Errno 2] No such file or directory: '<PYTEST_TMP>'
 
-C:\Miniconda\Lib\pathlib\_local.py:537: FileNotFoundError
+<ABS_PATH> FileNotFoundError
 ___ TestOriginalOnlyMode.test_only_original_is_written_and_reported_current ___
 
-self = <test_output_feedback.TestOriginalOnlyMode object at 0x000001F6258EDD10>
-engine = <MagicMock id='2156708573744'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_only_original_is_written_0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_only_original_is_written_0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_only_original_is_written_0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestOriginalOnlyMode object at 0x0000015E71D1DA90>
+engine = <MagicMock id='1505154054336'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_only_original_is_written_and_reported_current(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -178,7 +178,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:250: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_only_original_is_written_0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -190,11 +190,11 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _______ TestOriginalOnlyMode.test_translation_writers_are_not_requested _______
 
-self = <test_output_feedback.TestOriginalOnlyMode object at 0x000001F6258EDF90>
-engine = <MagicMock id='2156708571392'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_translation_writers_are_n0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_translation_writers_are_n0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_translation_writers_are_n0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestOriginalOnlyMode object at 0x0000015E71D1DF90>
+engine = <MagicMock id='1505153876720'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_translation_writers_are_not_requested(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -206,7 +206,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:268: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_translation_writers_are_n0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -218,11 +218,11 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _____________ TestOriginalOnlyMode.test_engine_start_is_recorded ______________
 
-self = <test_output_feedback.TestOriginalOnlyMode object at 0x000001F625EBD5B0>
-engine = <MagicMock id='2156708575760'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_start_is_recorded0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_start_is_recorded0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_start_is_recorded0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestOriginalOnlyMode object at 0x0000015E723C16E0>
+engine = <MagicMock id='1505153877392'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_engine_start_is_recorded(self, engine, audio_file, tmp_output_dir, sidecar):
         transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
@@ -232,7 +232,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:277: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_start_is_recorded0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -244,12 +244,12 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 ______ TestTranslationMode.test_three_files_written_and_reported_current ______
 
-self = <test_output_feedback.TestTranslationMode object at 0x000001F6258EE0D0>
-engine = <MagicMock id='2156708576432'>
-translator = <MagicMock id='2156706611280'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_three_files_written_and_r0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_three_files_written_and_r0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_three_files_written_and_r0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranslationMode object at 0x0000015E71D1E0D0>
+engine = <MagicMock id='1505153878064'>
+translator = <MagicMock id='1505153878736'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_three_files_written_and_reported_current(
         self, engine, translator, audio_file, tmp_output_dir, sidecar
@@ -270,7 +270,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:300: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_three_files_written_and_r0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -282,11 +282,11 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 __________ TestSkipExisting.test_skip_is_a_reuse_not_a_transcription __________
 
-self = <test_output_feedback.TestSkipExisting object at 0x000001F6258EE210>
-engine = <MagicMock id='2156706612288'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_skip_is_a_reuse_not_a_tra0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_skip_is_a_reuse_not_a_tra0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_skip_is_a_reuse_not_a_tra0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestSkipExisting object at 0x0000015E71D1E210>
+engine = <MagicMock id='1505153879744'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_skip_is_a_reuse_not_a_transcription(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -302,7 +302,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:328: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_skip_is_a_reuse_not_a_tra0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -314,12 +314,12 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestTranslationFailureKeepsStaleOutput.test_original_is_current_and_translations_are_stale _
 
-self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x000001F6258EE490>
-engine = <MagicMock id='2156706613632'>
-failing_translator = <MagicMock id='2156706614304'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_is_current_and_t0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_is_current_and_t0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_is_current_and_t0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x0000015E71D1E490>
+engine = <MagicMock id='1505154055008'>
+failing_translator = <MagicMock id='1505154054672'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_original_is_current_and_translations_are_stale(
         self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
@@ -345,7 +345,7 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:376: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_is_current_and_t0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -359,12 +359,12 @@ tests\test_output_feedback.py:148: AssertionError
 WARNING  core.pipeline:pipeline.py:170 翻译失败，跳过翻译文件: 翻译失败
 _ TestTranslationFailureKeepsStaleOutput.test_missing_translations_are_distinguished_from_stale_ones _
 
-self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x000001F6258EE5D0>
-engine = <MagicMock id='2156706615312'>
-failing_translator = <MagicMock id='2156706612960'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_missing_translations_are_0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_missing_translations_are_0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_missing_translations_are_0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x0000015E71D1E5D0>
+engine = <MagicMock id='1505154047280'>
+failing_translator = <MagicMock id='1505154054336'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_missing_translations_are_distinguished_from_stale_ones(
         self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
@@ -383,7 +383,47 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 tests\test_output_feedback.py:401: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_missing_translations_are_0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
+
+    def only_step(path: Path) -> str:
+        steps = {r["step_id"] for r in read_rows(path)}
+>       assert len(steps) == 1, f"期望恰好一个 step，实际 {steps}"
+E       AssertionError: 期望恰好一个 step，实际 set()
+E       assert 0 == 1
+E        +  where 0 = len(set())
+
+tests\test_output_feedback.py:148: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  core.pipeline:pipeline.py:170 翻译失败，跳过翻译文件: 翻译失败
+_ TestTranslationFailureKeepsStaleOutput.test_mixed_stale_and_missing_translations_are_named_exactly _
+
+self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x0000015E723C1810>
+engine = <MagicMock id='1505154048288'>
+failing_translator = <MagicMock id='1505154050304'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+
+    def test_mixed_stale_and_missing_translations_are_named_exactly(
+        self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
+    ):
+        """旧译文在、旧对照不在：与“全旧”与“全缺”都不同，因此有专属结果词。"""
+        (tmp_output_dir / "meeting_原文.txt").write_text(OLD_ORIGINAL, encoding="utf-8")
+        (tmp_output_dir / "meeting_翻译.txt").write_text(OLD_TRANSLATION, encoding="utf-8")
+        transcribe_one(
+            engine,
+            audio_file,
+            tmp_output_dir,
+            translator_obj=failing_translator,
+            force=True,
+        )
+>       rows = rows_of(sidecar, only_step(sidecar))
+                                ^^^^^^^^^^^^^^^^^^
+
+tests\test_output_feedback.py:422: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -397,12 +437,12 @@ tests\test_output_feedback.py:148: AssertionError
 WARNING  core.pipeline:pipeline.py:170 翻译失败，跳过翻译文件: 翻译失败
 _ TestTranslationFailureKeepsStaleOutput.test_sidecar_range_matches_the_old_bytes_on_disk _
 
-self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x000001F625EBD6E0>
-engine = <MagicMock id='2156706616320'>
-failing_translator = <MagicMock id='2156706616992'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_range_matches_the0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_range_matches_the0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_range_matches_the0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranslationFailureKeepsStaleOutput object at 0x0000015E723C1940>
+engine = <MagicMock id='1505154052656'>
+failing_translator = <MagicMock id='1505153712208'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_sidecar_range_matches_the_old_bytes_on_disk(
         self, engine, failing_translator, audio_file, tmp_output_dir, sidecar
@@ -425,17 +465,17 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 E       AssertionError: 必须有一条完成的步骤日志
 E       assert []
 
-tests\test_output_feedback.py:424: AssertionError
+tests\test_output_feedback.py:448: AssertionError
 ------------------------------ Captured log call ------------------------------
 WARNING  core.pipeline:pipeline.py:170 翻译失败，跳过翻译文件: 翻译失败
 _ TestSegmentCountMismatch.test_writer_rejects_and_nothing_translated_is_written _
 
-self = <test_output_feedback.TestSegmentCountMismatch object at 0x000001F6258EE710>
-engine = <MagicMock id='2156708576768'>
-mismatching_translator = <MagicMock id='2156708576096'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_writer_rejects_and_nothin0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_writer_rejects_and_nothin0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_writer_rejects_and_nothin0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestSegmentCountMismatch object at 0x0000015E71D1E710>
+engine = <MagicMock id='1505153713216'>
+mismatching_translator = <MagicMock id='1505153713888'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_writer_rejects_and_nothing_translated_is_written(
         self, engine, mismatching_translator, audio_file, tmp_output_dir, sidecar
@@ -453,10 +493,50 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:458: 
+tests\test_output_feedback.py:482: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_writer_rejects_and_nothin0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
+
+    def only_step(path: Path) -> str:
+        steps = {r["step_id"] for r in read_rows(path)}
+>       assert len(steps) == 1, f"期望恰好一个 step，实际 {steps}"
+E       AssertionError: 期望恰好一个 step，实际 set()
+E       assert 0 == 1
+E        +  where 0 = len(set())
+
+tests\test_output_feedback.py:148: AssertionError
+_ TestSegmentCountMismatch.test_original_write_failure_is_a_total_write_failure _
+
+self = <test_output_feedback.TestSegmentCountMismatch object at 0x0000015E71D1E850>
+engine = <MagicMock id='1505153714896'>
+translator = <MagicMock id='1505153715568'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E7223A710>
+
+    def test_original_write_failure_is_a_total_write_failure(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """一个目标都没提交时，终态才是 write_failed。"""
+    
+        def boom(*args, **kwargs):
+            raise OSError("原文写盘失败")
+    
+        monkeypatch.setattr("core.pipeline.write_original", boom)
+        with pytest.raises(OSError):
+            transcribe_one(
+                engine, audio_file, tmp_output_dir, translator_obj=translator
+            )
+    
+>       rows = rows_of(sidecar, only_step(sidecar))
+                                ^^^^^^^^^^^^^^^^^^
+
+tests\test_output_feedback.py:509: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -468,13 +548,13 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestBilingualWriteFailure.test_original_and_translation_survive_the_bilingual_failure _
 
-self = <test_output_feedback.TestBilingualWriteFailure object at 0x000001F6258EE850>
-engine = <MagicMock id='2156708574416'>
-translator = <MagicMock id='2156708574752'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_and_translation_0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_and_translation_0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_and_translation_0/feedback/run-1.jsonl')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F624BEAE90>
+self = <test_output_feedback.TestBilingualWriteFailure object at 0x0000015E71D1E990>
+engine = <MagicMock id='1505153716912'>
+translator = <MagicMock id='1505153717584'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E721EE2A0>
 
     def test_original_and_translation_survive_the_bilingual_failure(
         self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
@@ -495,10 +575,10 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F624BEAE90>
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:490: 
+tests\test_output_feedback.py:535: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_original_and_translation_0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -510,13 +590,13 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestBilingualWriteFailure.test_force_failure_keeps_previous_bytes_and_records_the_terminal_state _
 
-self = <test_output_feedback.TestBilingualWriteFailure object at 0x000001F6258EE990>
-engine = <MagicMock id='2156708571392'>
-translator = <MagicMock id='2156708573744'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_force_failure_keeps_previ0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_force_failure_keeps_previ0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_force_failure_keeps_previ0/feedback/run-1.jsonl')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625BA0370>
+self = <test_output_feedback.TestBilingualWriteFailure object at 0x0000015E71D1EAD0>
+engine = <MagicMock id='1505153718592'>
+translator = <MagicMock id='1505153719264'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E71ED9C50>
 
     def test_force_failure_keeps_previous_bytes_and_records_the_terminal_state(
         self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
@@ -545,10 +625,10 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625BA0370>
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:524: 
+tests\test_output_feedback.py:569: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_force_failure_keeps_previ0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -560,11 +640,11 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestTranscriptionFailure.test_engine_failure_is_terminal_and_writes_nothing _
 
-self = <test_output_feedback.TestTranscriptionFailure object at 0x000001F6258EEAD0>
-engine = <MagicMock id='2156708569040'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_failure_is_termina0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_failure_is_termina0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_failure_is_termina0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranscriptionFailure object at 0x0000015E71D1EC10>
+engine = <MagicMock id='1505153720272'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_engine_failure_is_terminal_and_writes_nothing(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -577,10 +657,10 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:541: 
+tests\test_output_feedback.py:586: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_engine_failure_is_termina0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -592,11 +672,11 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestTranscriptionFailure.test_interrupted_run_keeps_the_terminal_state_unknown _
 
-self = <test_output_feedback.TestTranscriptionFailure object at 0x000001F6258EEC10>
-engine = <MagicMock id='2156708573408'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_interrupted_run_keeps_the0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_interrupted_run_keeps_the0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_interrupted_run_keeps_the0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestTranscriptionFailure object at 0x0000015E71D1ED50>
+engine = <MagicMock id='1505153720944'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_interrupted_run_keeps_the_terminal_state_unknown(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -609,10 +689,10 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:556: 
+tests\test_output_feedback.py:601: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_interrupted_run_keeps_the0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -624,13 +704,13 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 _ TestSidecarIsOptional.test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel _
 
-self = <test_output_feedback.TestSidecarIsOptional object at 0x000001F625EBD0F0>
-engine = <MagicMock id='2156708973264'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_write_failure_is_0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_write_failure_is_0/output')
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_write_failure_is_0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F625DBAF90>
-caplog = <_pytest.logging.LogCaptureFixture object at 0x000001F625DF4D70>
+self = <test_output_feedback.TestSidecarIsOptional object at 0x0000015E723C1220>
+engine = <MagicMock id='1505153723968'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+tmp_path = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E7226BE70>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x0000015E722730E0>
 
     def test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel(
         self, engine, audio_file, tmp_output_dir, tmp_path, monkeypatch, caplog
@@ -646,34 +726,15 @@ caplog = <_pytest.logging.LogCaptureFixture object at 0x000001F625DF4D70>
 >       assert any("反馈旁路" in m for m in messages), messages
 E       AssertionError: []
 E       assert False
-E        +  where False = any(<generator object TestSidecarIsOptional.test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel.<locals>.<genexpr> at 0x000001F625EA4A00>)
+E        +  where False = any(<generator object TestSidecarIsOptional.test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel.<locals>.<genexpr> at 0x0000015E71E8BD30>)
 
-tests\test_output_feedback.py:614: AssertionError
-_ TestSidecarIsOptional.test_sidecar_latency_does_not_enter_the_published_timing _
-
-self = <test_output_feedback.TestSidecarIsOptional object at 0x000001F6259669F0>
-engine = <MagicMock id='2156708972592'>
-translator = <MagicMock id='2156708971584'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_latency_does_not_0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_sidecar_latency_does_not_0/output')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F6258C3700>
-
-    def test_sidecar_latency_does_not_enter_the_published_timing(
-        self, engine, translator, audio_file, tmp_output_dir, monkeypatch
-    ):
-        """旁路自己的写入耗时不进被发布的耗时，因此不改产物字节。"""
-        import time as _time
-    
->       from core import feedback
-E       ImportError: cannot import name 'feedback' from 'core' (C:\Users\郑曾波\AppData\Local\Temp\mc-red-receipt-vgyo1v9g\red\core\__init__.py)
-
-tests\test_output_feedback.py:632: ImportError
+tests\test_output_feedback.py:659: AssertionError
 _ TestSidecarIsOptional.test_run_id_is_stable_without_the_host_supplied_identity _
 
-self = <test_output_feedback.TestSidecarIsOptional object at 0x000001F62584F460>
-engine = <MagicMock id='2156708972928'>
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_run_id_is_stable_without_0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F6258C3D90>
+self = <test_output_feedback.TestSidecarIsOptional object at 0x0000015E71C7F460>
+engine = <MagicMock id='1505153721616'>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E71CF2DD0>
 
     def test_run_id_is_stable_without_the_host_supplied_identity(
         self, engine, tmp_path, monkeypatch
@@ -699,13 +760,13 @@ E       AssertionError: set()
 E       assert 0 == 1
 E        +  where 0 = len(set())
 
-tests\test_output_feedback.py:679: AssertionError
+tests\test_output_feedback.py:726: AssertionError
 ___ TestObservationIdentity.test_two_same_named_inputs_are_distinguishable ____
 
-self = <test_output_feedback.TestObservationIdentity object at 0x000001F6258ED810>
-engine = <MagicMock id='2156708978976'>
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_two_same_named_inputs_are0')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_two_same_named_inputs_are0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestObservationIdentity object at 0x0000015E71D1EFD0>
+engine = <MagicMock id='1505153727664'>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_two_same_named_inputs_are_distinguishable(
         self, engine, tmp_path, sidecar
@@ -735,14 +796,14 @@ E       AssertionError: 同名不同来源的音频必须可区分
 E       assert 0 == 2
 E        +  where 0 = len(set())
 
-tests\test_output_feedback.py:787: AssertionError
+tests\test_output_feedback.py:834: AssertionError
 _____ TestObservationIdentity.test_redelivery_reuses_the_original_step_id _____
 
-self = <test_output_feedback.TestObservationIdentity object at 0x000001F6258EEFD0>
-engine = <MagicMock id='2156708977968'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_redelivery_reuses_the_ori0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_redelivery_reuses_the_ori0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_redelivery_reuses_the_ori0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestObservationIdentity object at 0x0000015E71D1F110>
+engine = <MagicMock id='1505154052656'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_redelivery_reuses_the_original_step_id(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -751,10 +812,10 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 >       first_step = only_step(sidecar)
                      ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:799: 
+tests\test_output_feedback.py:846: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_redelivery_reuses_the_ori0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -766,9 +827,9 @@ E        +  where 0 = len(set())
 tests\test_output_feedback.py:148: AssertionError
 ___ TestDifferentLanguages.test_two_languages_are_independent_observations ____
 
-self = <test_output_feedback.TestDifferentLanguages object at 0x000001F6258EF110>
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_two_languages_are_indepen0')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_two_languages_are_indepen0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestDifferentLanguages object at 0x0000015E71D1F390>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_two_languages_are_independent_observations(
         self, tmp_path, sidecar
@@ -805,12 +866,12 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 E       assert 0 == 2
 E        +  where 0 = len(set())
 
-tests\test_output_feedback.py:857: AssertionError
+tests\test_output_feedback.py:904: AssertionError
 ______ TestPublicEntryIntegration.test_batch_entry_writes_text_and_jsonl ______
 
-self = <test_output_feedback.TestPublicEntryIntegration object at 0x000001F6258EF390>
-tmp_path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_batch_entry_writes_text_a0')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_batch_entry_writes_text_a0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E71D1F610>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_batch_entry_writes_text_and_jsonl(self, tmp_path, sidecar):
         """从公开批处理入口走到真实文本写入与 JSONL。"""
@@ -861,14 +922,106 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 E       assert 0 == 2
 E        +  where 0 = len(set())
 
-tests\test_output_feedback.py:914: AssertionError
+tests\test_output_feedback.py:961: AssertionError
+_ TestPublicEntryIntegration.test_redaction_cuts_paths_but_keeps_ordinary_text _
+
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E71D1F750>
+
+    def test_redaction_cuts_paths_but_keeps_ordinary_text(self):
+        """脱敏只吃真正的绝对路径，普通文本里的斜杠不受影响。"""
+>       from core.feedback import scrub_text
+E       ModuleNotFoundError: No module named 'core.feedback'
+
+tests\test_output_feedback.py:970: ModuleNotFoundError
+_ TestPublicEntryIntegration.test_details_ref_is_absent_when_the_details_never_landed _
+
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E723C1CD0>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+
+    def test_details_ref_is_absent_when_the_details_never_landed(self, tmp_path):
+        """details 写不进去时不写 details_ref：不留下悬挂引用。"""
+>       from core.feedback import FeedbackRecorder
+E       ModuleNotFoundError: No module named 'core.feedback'
+
+tests\test_output_feedback.py:998: ModuleNotFoundError
+_ TestPublicEntryIntegration.test_details_ref_is_present_when_the_details_did_land _
+
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E723C1E00>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+
+    def test_details_ref_is_present_when_the_details_did_land(self, tmp_path):
+        """details 正常落盘时才有 details_ref。"""
+>       from core.feedback import FeedbackRecorder
+E       ModuleNotFoundError: No module named 'core.feedback'
+
+tests\test_output_feedback.py:1022: ModuleNotFoundError
+___ TestPublicEntryIntegration.test_failure_path_records_real_elapsed_times ___
+
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E71D883B0>
+engine = <MagicMock id='1505154047616'>
+translator = <MagicMock id='1505153725648'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E72268130>
+
+    def test_failure_path_records_real_elapsed_times(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """失败路径上耗时照样记账：消费方能区分立刻失败与干了一会儿才失败。"""
+        import time as _time
+    
+        def slow_transcribe(*args, **kwargs):
+            _time.sleep(0.2)
+            raise RuntimeError("引擎干了一会儿才失败")
+    
+        engine.transcribe.side_effect = slow_transcribe
+        with pytest.raises(RuntimeError):
+            transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=translator)
+    
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        finished = [r for r in read_rows(details) if r.get("phase") == "finished"]
+>       assert finished
+E       assert []
+
+tests\test_output_feedback.py:1055: AssertionError
+_ TestPublicEntryIntegration.test_details_metrics_are_truthful_on_a_failure_path _
+
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E723D5040>
+engine = <MagicMock id='1505153722960'>
+translator = <MagicMock id='1505153723632'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015E71D9AEB0>
+
+    def test_details_metrics_are_truthful_on_a_failure_path(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        """失败路径上的步骤日志仍然说得清这一轮做了什么，不是一片 0。"""
+    
+        def boom(*args, **kwargs):
+            raise OSError("对照写盘失败")
+    
+        monkeypatch.setattr("core.pipeline.write_bilingual", boom)
+        with pytest.raises(OSError):
+            transcribe_one(
+                engine, audio_file, tmp_output_dir, translator_obj=translator
+            )
+    
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        finished = [r for r in read_rows(details) if r.get("phase") == "finished"]
+>       assert finished
+E       assert []
+
+tests\test_output_feedback.py:1076: AssertionError
 ___ TestPublicEntryIntegration.test_cost_is_unknown_without_a_usage_receipt ___
 
-self = <test_output_feedback.TestPublicEntryIntegration object at 0x000001F6258EF4D0>
-engine = <MagicMock id='2156708979312'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_cost_is_unknown_without_a0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_cost_is_unknown_without_a0/output')
-sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_cost_is_unknown_without_a0/feedback/run-1.jsonl')
+self = <test_output_feedback.TestPublicEntryIntegration object at 0x0000015E723D5150>
+engine = <MagicMock id='1505153723296'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
+sidecar = WindowsPath('<PYTEST_TMP>')
 
     def test_cost_is_unknown_without_a_usage_receipt(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -877,10 +1030,10 @@ sidecar = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波
 >       rows = rows_of(sidecar, only_step(sidecar))
                                 ^^^^^^^^^^^^^^^^^^
 
-tests\test_output_feedback.py:925: 
+tests\test_output_feedback.py:1086: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-path = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1775/test_cost_is_unknown_without_a0/feedback/run-1.jsonl')
+path = WindowsPath('<PYTEST_TMP>')
 
     def only_step(path: Path) -> str:
         steps = {r["step_id"] for r in read_rows(path)}
@@ -902,18 +1055,24 @@ FAILED tests/test_output_feedback.py::TestTranslationMode::test_three_files_writ
 FAILED tests/test_output_feedback.py::TestSkipExisting::test_skip_is_a_reuse_not_a_transcription
 FAILED tests/test_output_feedback.py::TestTranslationFailureKeepsStaleOutput::test_original_is_current_and_translations_are_stale
 FAILED tests/test_output_feedback.py::TestTranslationFailureKeepsStaleOutput::test_missing_translations_are_distinguished_from_stale_ones
+FAILED tests/test_output_feedback.py::TestTranslationFailureKeepsStaleOutput::test_mixed_stale_and_missing_translations_are_named_exactly
 FAILED tests/test_output_feedback.py::TestTranslationFailureKeepsStaleOutput::test_sidecar_range_matches_the_old_bytes_on_disk
 FAILED tests/test_output_feedback.py::TestSegmentCountMismatch::test_writer_rejects_and_nothing_translated_is_written
+FAILED tests/test_output_feedback.py::TestSegmentCountMismatch::test_original_write_failure_is_a_total_write_failure
 FAILED tests/test_output_feedback.py::TestBilingualWriteFailure::test_original_and_translation_survive_the_bilingual_failure
 FAILED tests/test_output_feedback.py::TestBilingualWriteFailure::test_force_failure_keeps_previous_bytes_and_records_the_terminal_state
 FAILED tests/test_output_feedback.py::TestTranscriptionFailure::test_engine_failure_is_terminal_and_writes_nothing
 FAILED tests/test_output_feedback.py::TestTranscriptionFailure::test_interrupted_run_keeps_the_terminal_state_unknown
 FAILED tests/test_output_feedback.py::TestSidecarIsOptional::test_sidecar_write_failure_is_reported_on_the_local_diagnostic_channel
-FAILED tests/test_output_feedback.py::TestSidecarIsOptional::test_sidecar_latency_does_not_enter_the_published_timing
 FAILED tests/test_output_feedback.py::TestSidecarIsOptional::test_run_id_is_stable_without_the_host_supplied_identity
 FAILED tests/test_output_feedback.py::TestObservationIdentity::test_two_same_named_inputs_are_distinguishable
 FAILED tests/test_output_feedback.py::TestObservationIdentity::test_redelivery_reuses_the_original_step_id
 FAILED tests/test_output_feedback.py::TestDifferentLanguages::test_two_languages_are_independent_observations
 FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_batch_entry_writes_text_and_jsonl
+FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_redaction_cuts_paths_but_keeps_ordinary_text
+FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_details_ref_is_absent_when_the_details_never_landed
+FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_details_ref_is_present_when_the_details_did_land
+FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_failure_path_records_real_elapsed_times
+FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_details_metrics_are_truthful_on_a_failure_path
 FAILED tests/test_output_feedback.py::TestPublicEntryIntegration::test_cost_is_unknown_without_a_usage_receipt
-25 failed, 9 passed in 2.46s
+31 failed, 9 passed, 1 skipped in 3.56s

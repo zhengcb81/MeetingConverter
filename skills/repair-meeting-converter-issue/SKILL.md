@@ -65,13 +65,27 @@ Four situations must never be collapsed into one another:
   failed;
 - `reused_existing` — the documented skip: this round produced nothing.
 
-`published_partial` (a writer failed) and `published_incomplete` (this round
-produced no translation at all) are two different terminal states.
+`published_partial` (some targets were committed and another writer failed) and
+`published_incomplete` (this round produced no translation at all) are two
+different terminal states. `write_failed` is the terminal state of a write
+failure that committed nothing at all.
 
 `expected` and `actual` differ exactly when the disposition is `deviation`, except
 for `cost-receipt`, which is `unknown` by construction, and for a terminal state of
-`unknown` — a run that was stopped without a credible terminal state. A start row
-without a matching terminal row also means: the terminal state is unknown.
+`unknown` — a run that was stopped without a credible terminal state. The terminal
+row is written **last**, so a sidecar that was not written completely ends without
+a `publication-outcome`: a start row without a matching terminal row also means
+that the terminal state is unknown.
+
+`issue_key` is present only where the owner has adjudicated the cause
+(`stale-output-success` for a previous version of the translation or the bilingual
+file that really survived on disk). Its absence means "not adjudicated yet", not
+"no problem": `missing_translations` shares the responsible layer but has no
+surviving old file to point at.
+
+Two files are written per run: the sidecar itself (`RESEARCH_FEEDBACK_OUT`) and
+its sibling `*.details.jsonl` step log. A consumer that collects the observation
+has to collect both.
 
 ## Procedure
 

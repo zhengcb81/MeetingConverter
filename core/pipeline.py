@@ -128,7 +128,6 @@ def transcribe_one(
 
     feedback = begin_operation(
         audio_path=audio_path,
-        output_dir=output_dir,
         translate_requested=translator_obj is not None,
         force=force,
     )
@@ -157,29 +156,38 @@ def transcribe_one(
 
     try:
         with total_timer:
-            with Timer() as stt_timer:
-                feedback.set_stage(STAGE_TRANSCRIPTION)
-                feedback.note_engine_started()
-                result = engine.transcribe(
-                    str(audio_path), language=language, initial_prompt=initial_prompt
-                )
-                lang, lang_prob, duration = (
-                    result.language,
-                    result.language_probability,
-                    result.duration,
-                )
-                logger.info(f"语言: {lang} ({lang_prob:.1%})  时长: {fmt_ts(duration)}")
-
-                if result.paragraph_level:
-                    paragraphs = result.segments
-                else:
-                    logger.info("合并段落...")
-                    paragraphs = merge_into_paragraphs(
-                        result.segments,
-                        gap_threshold=merge_gap_sec,
-                        max_chars=paragraph_max_chars,
+            stt_timer = Timer()
+            try:
+                with stt_timer:
+                    feedback.set_stage(STAGE_TRANSCRIPTION)
+                    feedback.note_engine_started()
+                    result = engine.transcribe(
+                        str(audio_path), language=language, initial_prompt=initial_prompt
                     )
-            metrics.stt_elapsed = stt_timer.elapsed
+                    lang, lang_prob, duration = (
+                        result.language,
+                        result.language_probability,
+                        result.duration,
+                    )
+                    logger.info(f"语言: {lang} ({lang_prob:.1%})  时长: {fmt_ts(duration)}")
+
+                    if result.paragraph_level:
+                        paragraphs = result.segments
+                    else:
+                        logger.info("合并段落...")
+                        paragraphs = merge_into_paragraphs(
+                            result.segments,
+                            gap_threshold=merge_gap_sec,
+                            max_chars=paragraph_max_chars,
+                        )
+                    # 段落数与字数在计时区间内如实记账：失败路径上的步骤日志
+                    # 因此仍然是这一轮的真实事实，而不是一片 0。
+                    metrics.paragraphs = len(paragraphs)
+                    metrics.text_length = sum(len(para.text) for para in paragraphs)
+            finally:
+                # 引擎抛错时耗时照样记账：失败路径的步骤日志说得清工作了多久，
+                # 消费方因此能区分“立刻失败”与“干了一会儿才失败”。
+                metrics.stt_elapsed = stt_timer.elapsed
             metrics.duration = duration
             logger.info(f"转写完成: {len(paragraphs)} 段, {stt_timer.elapsed:.1f}秒")
 
@@ -192,19 +200,22 @@ def transcribe_one(
                     f"公司: {company_context.split(chr(10))[0] if company_context else '无'})"
                 )
                 feedback.set_stage(STAGE_TRANSLATION)
-                with Timer() as trans_timer:
-                    try:
-                        translations = translator_obj.translate_paragraphs(
-                            [para.text for para in paragraphs],
-                            company_context=company_context,
-                            corrections=corrections,
-                            progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
-                        )
-                    except TranslationError as e:
-                        logger.warning(f"翻译失败，跳过翻译文件: {e}")
-                        translations = None
-                        translation_failed = True
-                metrics.translate_elapsed = trans_timer.elapsed
+                trans_timer = Timer()
+                try:
+                    with trans_timer:
+                        try:
+                            translations = translator_obj.translate_paragraphs(
+                                [para.text for para in paragraphs],
+                                company_context=company_context,
+                                corrections=corrections,
+                                progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
+                            )
+                        except TranslationError as e:
+                            logger.warning(f"翻译失败，跳过翻译文件: {e}")
+                            translations = None
+                            translation_failed = True
+                finally:
+                    metrics.translate_elapsed = trans_timer.elapsed
                 if translations is not None:
                     logger.info(f"翻译完成: {trans_timer.elapsed:.1f}秒")
 
@@ -219,59 +230,66 @@ def transcribe_one(
                 "translator_model": translator_obj.model if translator_obj else "N/A",
             }
 
-            with Timer() as output_timer:
-                feedback.set_stage(STAGE_OUTPUT)
-                orig = output_dir / f"{stem}_原文.txt"
-                try:
-                    write_original(orig, paragraphs, meta, timestamps)
-                except Exception as exc:
-                    feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
-                    raise
-                feedback.note_writer_committed(ROLE_ORIGINAL, orig)
-                logger.info(f"  原文: {orig}")
+            output_timer = Timer()
+            try:
+                with output_timer:
+                    feedback.set_stage(STAGE_OUTPUT)
+                    orig = output_dir / f"{stem}_原文.txt"
+                    try:
+                        write_original(orig, paragraphs, meta, timestamps)
+                    except BaseException as exc:
+                        # 连 BaseException 也记这一行：写盘中被打断时消费方
+                        # 仍能看到这个角色的失败事实，异常照常向上抛。
+                        feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
+                        raise
+                    feedback.note_writer_committed(ROLE_ORIGINAL, orig)
+                    logger.info(f"  原文: {orig}")
 
-                if translations is None:
-                    logger.info("  未启用翻译，跳过翻译和中英对照文件")
-                    if translation_failed:
-                        # 本轮没有产出译文与对照：旧件仍在，或根本没有。
-                        feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
-                        feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                    if translations is None:
+                        logger.info("  未启用翻译，跳过翻译和中英对照文件")
+                        if translation_failed:
+                            # 本轮没有产出译文与对照：旧件仍在，或根本没有。
+                            feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
+                            feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                        else:
+                            feedback.note_writer_not_requested(ROLE_TRANSLATED)
+                            feedback.note_writer_not_requested(ROLE_BILINGUAL)
                     else:
-                        feedback.note_writer_not_requested(ROLE_TRANSLATED)
-                        feedback.note_writer_not_requested(ROLE_BILINGUAL)
-                else:
-                    tr = output_dir / f"{stem}_翻译.txt"
-                    try:
-                        write_translated(tr, paragraphs, translations, meta, timestamps)
-                    except Exception as exc:
-                        feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
-                        raise
-                    feedback.note_writer_committed(ROLE_TRANSLATED, tr)
-                    logger.info(f"  翻译: {tr}")
+                        tr = output_dir / f"{stem}_翻译.txt"
+                        try:
+                            write_translated(tr, paragraphs, translations, meta, timestamps)
+                        except BaseException as exc:
+                            feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
+                            raise
+                        feedback.note_writer_committed(ROLE_TRANSLATED, tr)
+                        logger.info(f"  翻译: {tr}")
 
-                    bi = output_dir / f"{stem}_中英对照.txt"
-                    try:
-                        write_bilingual(bi, paragraphs, translations, meta, timestamps)
-                    except Exception as exc:
-                        feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
-                        raise
-                    feedback.note_writer_committed(ROLE_BILINGUAL, bi)
-                    logger.info(f"  对照: {bi}")
-            metrics.output_elapsed = output_timer.elapsed
+                        bi = output_dir / f"{stem}_中英对照.txt"
+                        try:
+                            write_bilingual(bi, paragraphs, translations, meta, timestamps)
+                        except BaseException as exc:
+                            feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
+                            raise
+                        feedback.note_writer_committed(ROLE_BILINGUAL, bi)
+                        logger.info(f"  对照: {bi}")
+            finally:
+                # writer 抛错时输出耗时照样记账：失败路径的步骤日志因此仍然
+                # 说得清这一轮做了什么。
+                metrics.output_elapsed = output_timer.elapsed
 
         metrics.total_elapsed = total_timer.elapsed
-        metrics.paragraphs = len(paragraphs)
-        metrics.text_length = sum(len(para.text) for para in paragraphs)
         logger.info(f"性能: {metrics.summary()}")
         feedback.finish(_metric_snapshot(metrics))
     except Exception as exc:
         # 异常终态是可知的：按阶段给出失败原因。
+        metrics.total_elapsed = total_timer.elapsed
         feedback.note_abort()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))
         raise
     except BaseException as exc:
         # 被中止：没有可信终态，终态保留 unknown。
+        metrics.total_elapsed = total_timer.elapsed
         feedback.mark_unknown()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))

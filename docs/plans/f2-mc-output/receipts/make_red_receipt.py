@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,16 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[4]
 BASE = "b43a76a"
 TEST_FILE = Path("tests/test_output_feedback.py")
+
+#: pytest 的临时根与其下的绝对路径：收据里不留机器的绝对路径。
+_PYTEST_TMP = re.compile(r"[A-Za-z]:[\\/][^\s'\"\n]*pytest-of-[^\s'\"\n]*")
+_ABS_PATH = re.compile(r"[A-Za-z]:[\\/][^\s'\"\n]*")
+
+
+def scrub(text: str) -> str:
+    """把收据里的机器绝对路径换成占位词。"""
+    text = _PYTEST_TMP.sub("<PYTEST_TMP>", text)
+    return _ABS_PATH.sub("<ABS_PATH>", text)
 
 HEADER = f"""# RED 收据 —— tests/test_output_feedback.py 在实现之前（基线 {BASE}）的真实失败
 #
@@ -65,7 +76,7 @@ def main() -> int:
         )
         output = run.stdout + run.stderr
         (HERE / "red-output-feedback.txt").write_text(
-            HEADER + output, encoding="utf-8", newline="\n"
+            HEADER + scrub(output), encoding="utf-8", newline="\n"
         )
         print(output.strip().splitlines()[-1])
         return 0

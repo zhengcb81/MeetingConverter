@@ -6,11 +6,11 @@
 ================================== FAILURES ===================================
 ____________ TestWithTranslateThreeFiles.test_three_files_written _____________
 
-self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x00000232963B1A90>
-mock_engine = <MagicMock id='2416292882352'>
-mock_translator = <MagicMock id='2416292883024'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_three_files_written0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_three_files_written0/output')
+self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x0000028E3C7A1A90>
+mock_engine = <MagicMock id='2809924052912'>
+mock_translator = <MagicMock id='2809924053584'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
 
     def test_three_files_written(
         self, mock_engine, mock_translator, audio_file, tmp_output_dir
@@ -33,7 +33,7 @@ core\output.py:65: in _render_translated
     _check_paired_lengths(paragraphs, translations)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-paragraphs = [<core.pipeline.Paragraph object at 0x00000232963E9A70>]
+paragraphs = [<core.pipeline.Paragraph object at 0x0000028E3C7D9A70>]
 translations = ['营收同比增长30%', '毛利率提升至21.5%']
 
     def _check_paired_lengths(paragraphs: list, translations: List[str]) -> None:
@@ -46,11 +46,11 @@ E           core.output.OutputCountMismatchError: translations 数量与段落�
 core\output.py:43: OutputCountMismatchError
 ____________ TestWithTranslateThreeFiles.test_translation_content _____________
 
-self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x00000232963B1D10>
-mock_engine = <MagicMock id='2416292884368'>
-mock_translator = <MagicMock id='2416292878992'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_translation_content0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_translation_content0/output')
+self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x0000028E3C7A1D10>
+mock_engine = <MagicMock id='2809924054928'>
+mock_translator = <MagicMock id='2809924049552'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
 
     def test_translation_content(
         self, mock_engine, mock_translator, audio_file, tmp_output_dir
@@ -73,7 +73,7 @@ core\output.py:65: in _render_translated
     _check_paired_lengths(paragraphs, translations)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-paragraphs = [<core.pipeline.Paragraph object at 0x00000232963EA060>]
+paragraphs = [<core.pipeline.Paragraph object at 0x0000028E3C7DA060>]
 translations = ['营收同比增长30%', '毛利率提升至21.5%']
 
     def _check_paired_lengths(paragraphs: list, translations: List[str]) -> None:
@@ -86,11 +86,11 @@ E           core.output.OutputCountMismatchError: translations 数量与段落�
 core\output.py:43: OutputCountMismatchError
 ______________ TestWithTranslateThreeFiles.test_bilingual_pairs _______________
 
-self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x00000232963E8FC0>
-mock_engine = <MagicMock id='2416292879328'>
-mock_translator = <MagicMock id='2416292885376'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_bilingual_pairs0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_bilingual_pairs0/output')
+self = <test_transcribe_integration.TestWithTranslateThreeFiles object at 0x0000028E3C7D8FC0>
+mock_engine = <MagicMock id='2809924049888'>
+mock_translator = <MagicMock id='2809924055936'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
 
     def test_bilingual_pairs(
         self, mock_engine, mock_translator, audio_file, tmp_output_dir
@@ -113,7 +113,7 @@ core\output.py:65: in _render_translated
     _check_paired_lengths(paragraphs, translations)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-paragraphs = [<core.pipeline.Paragraph object at 0x000002329641BD10>]
+paragraphs = [<core.pipeline.Paragraph object at 0x0000028E3C80BD10>]
 translations = ['营收同比增长30%', '毛利率提升至21.5%']
 
     def _check_paired_lengths(paragraphs: list, translations: List[str]) -> None:
@@ -126,11 +126,11 @@ E           core.output.OutputCountMismatchError: translations 数量与段落�
 core\output.py:43: OutputCountMismatchError
 _____ TestCorrectionsAppliedInTranscribe.test_corrections_passed_through ______
 
-self = <test_transcribe_integration.TestCorrectionsAppliedInTranscribe object at 0x00000232963B20D0>
-mock_engine = <MagicMock id='2416293594512'>
-mock_translator = <MagicMock id='2416293595184'>
-audio_file = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_corrections_passed_throug0/meeting.mp3')
-tmp_output_dir = WindowsPath('C:/Users/郑曾波/AppData/Local/Temp/pytest-of-郑曾波/pytest-1774/test_corrections_passed_throug0/output')
+self = <test_transcribe_integration.TestCorrectionsAppliedInTranscribe object at 0x0000028E3C7A20D0>
+mock_engine = <MagicMock id='2809924830608'>
+mock_translator = <MagicMock id='2809924831280'>
+audio_file = WindowsPath('<PYTEST_TMP>')
+tmp_output_dir = WindowsPath('<PYTEST_TMP>')
 
     def test_corrections_passed_through(
         self, mock_engine, mock_translator, audio_file, tmp_output_dir
@@ -154,7 +154,7 @@ core\output.py:65: in _render_translated
     _check_paired_lengths(paragraphs, translations)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
-paragraphs = [<core.pipeline.Paragraph object at 0x000002329640A580>]
+paragraphs = [<core.pipeline.Paragraph object at 0x0000028E3C7FA580>]
 translations = ['营收同比增长30%', '毛利率提升至21.5%']
 
     def _check_paired_lengths(paragraphs: list, translations: List[str]) -> None:
@@ -170,4 +170,4 @@ FAILED tests/test_transcribe_integration.py::TestWithTranslateThreeFiles::test_t
 FAILED tests/test_transcribe_integration.py::TestWithTranslateThreeFiles::test_translation_content
 FAILED tests/test_transcribe_integration.py::TestWithTranslateThreeFiles::test_bilingual_pairs
 FAILED tests/test_transcribe_integration.py::TestCorrectionsAppliedInTranscribe::test_corrections_passed_through
-4 failed, 5 passed in 1.65s
+4 failed, 5 passed in 0.74s

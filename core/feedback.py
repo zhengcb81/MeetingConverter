@@ -2,9 +2,11 @@
 
 这个模块把一次转录操作的事实投影成跨仓可读的观察行。它只写两样东西：
 ``RESEARCH_FEEDBACK_OUT`` 指定的 JSONL 旁路，和该文件同名的 ``*.details.jsonl``
-步骤日志。它不写 stdout、不写 stderr、不改返回值、不改任何产物字节，也不
-触碰逐字稿正文。旁路写不进去时，只在本仓已有的本地诊断通道（logging）和
-recorder 自身的计数上报告；业务结果、退出码与重试行为完全由主任务自己决定。
+步骤日志。旁路本身不写 stdout/stderr、不改返回值、不改任何产物字节，也不触碰
+逐字稿正文。旁路写不进去时，只在本仓已有的本地诊断通道（logging）和 recorder
+自身的计数上报告；业务结果、退出码与重试行为完全由主任务自己决定。注意：
+本仓 CLI 把 logging 接到 stdout（``transcribe.py``），因此这些**诊断行**会出现在
+CLI 的 stdout 上，业务日志行本身不变。
 
 词表（稳定结果词；细节留在本仓的 details 记录里）：
 
@@ -149,8 +151,18 @@ REDACTED_PATH = "<path>"
 REDACTED_INPUT = "<input>"
 MAX_ERROR_MESSAGE = 200
 
-#: 绝对路径形态：盘符路径、UNC 路径、至少含一段目录的 POSIX 路径。
-_ABSOLUTE_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s\"']+|(?<![\w.])/[^\s\"']*/[^\s\"']*")
+#: 绝对路径形态：盘符路径、UNC 路径、以 / 开头的 POSIX 路径（含单段）。
+#: 只吃真正的绝对路径：普通文本里的 a/b、and/or、2024/2025、20%/30%、
+#: （/备注）这类不受影响。
+#: - 盘符前不能是字母数字，否则 error:/root 里的 r 会被当成盘符吃掉；
+#: - POSIX 的 / 前不能是词字符、百分号或括号（否则 20%/30%、（/备注）被吃），
+#:   且 / 后要像一段路径的开头（否则 /备注 这种叙述性斜杠被吃）。
+_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/][^\s\"']+"  # 盘符路径
+    r"|\\\\[^\s\"']+"  # UNC
+    r"|(?<![\w.%()（）\[\]【】{}｛｝<>〈〉《》「」『』,，、;；])"
+    r"/(?=[A-Za-z0-9._~-])[^\s\"']*"  # POSIX 绝对路径
+)
 
 
 def _is_str(value: Any) -> bool:
@@ -394,12 +406,14 @@ class FeedbackRecorder:
             detail_record = dict(details)
             identifier = _details_identity(detail_record)
             detail_record["details_id"] = identifier
-            if identifier not in self._details_written:
-                if self._append_jsonl(
-                    self.details_path, detail_record, sink=self._details_sink
-                ):
-                    self._details_written.add(identifier)
-            observation["details_ref"] = identifier
+            if identifier in self._details_written:
+                observation["details_ref"] = identifier
+            elif self._append_jsonl(
+                self.details_path, detail_record, sink=self._details_sink
+            ):
+                self._details_written.add(identifier)
+                observation["details_ref"] = identifier
+            # details 写不进去时不写 details_ref：不留下指向不存在记录的悬挂引用。
 
         if not self._append_jsonl(self.out_path, observation, sink=self._sink):
             # 这一行没有到达旁路：它在这里不留身份，之后的尝试仍可送达。
@@ -438,6 +452,10 @@ class FeedbackRecorder:
         self.write_failures += 1
         self.diagnostics.append(kind)
         logger.warning(f"反馈旁路写入失败（不影响本次转录结果）: {kind}")
+
+    def note_failure(self, kind: str) -> None:
+        """对外的诊断入口（供 flush 兜底使用）。"""
+        self._note_failure(kind)
 
 
 # ── 进程内 recorder ──────────────────────────────────────────────
@@ -518,7 +536,6 @@ class OperationFeedback:
         *,
         input_id: str,
         audio_path: Any,
-        output_dir: Any,
         requested_mode: str,
         force: bool,
     ) -> None:
@@ -526,7 +543,6 @@ class OperationFeedback:
         self.input_id = input_id
         self.step_id = step_id_for(input_id)
         self.audio_path = Path(audio_path)
-        self.output_dir = Path(output_dir)
         self.requested_mode = requested_mode
         self.force = bool(force)
         self._writers: Dict[str, Dict[str, Any]] = {}
@@ -679,6 +695,21 @@ class OperationFeedback:
         outcome_expected = (
             EXPECTED_REUSED if self._reused is not None else PUBLISHED_CURRENT
         )
+
+        # 费用行先写，终态行最后写：这样一次没写完的旁路一定以“没有终态”
+        # 收尾，消费方据此判定终态未知，而不会把半截记录读成可信终态。
+        self._pending.append(
+            {
+                "step_id": self.step_id,
+                "check_id": CHECK_COST_RECEIPT,
+                "expected": COST_UNKNOWN,
+                "actual": COST_UNKNOWN,
+                "disposition": "unknown",
+                "evidence_ref": evidence_ref_for(self.input_id),
+                "details": details,
+            }
+        )
+
         self._pending.append(
             {
                 "step_id": self.step_id,
@@ -699,29 +730,25 @@ class OperationFeedback:
             }
         )
 
-        self._pending.append(
-            {
-                "step_id": self.step_id,
-                "check_id": CHECK_COST_RECEIPT,
-                "expected": COST_UNKNOWN,
-                "actual": COST_UNKNOWN,
-                "disposition": "unknown",
-                "evidence_ref": evidence_ref_for(self.input_id),
-                "details": details,
-            }
-        )
-
     def flush(self) -> None:
         """把缓冲的观察写到旁路。
 
         调用方必须在没有任何计时器打开时调用它：旁路自身的写入耗时不属于
         被测量的那段工作。重复调用是安全的——同样的内容只写一次。
+
+        写盘过程中出现的任何异常都不得替换业务结果：这里的异常一律记成
+        不完整的诊断，业务的返回值与退出码不受影响。
         """
         if self._recorder is None or not self._pending:
             return
         pending, self._pending = self._pending, []
         for entry in pending:
-            self._recorder.record(**entry)
+            try:
+                self._recorder.record(**entry)
+            except BaseException as exc:  # 旁路的任何异常都不替换业务结果
+                self._recorder.note_failure(
+                    f"feedback_write_failed:{type(exc).__name__}"
+                )
 
     # ── 内部 ──────────────────────────────────────────────────────
 
@@ -762,12 +789,13 @@ class OperationFeedback:
             )
 
     def _issue_key(self, requested_actual: str) -> Optional[str]:
-        """根因已确认时才带 issue_key。"""
-        if requested_actual in (
-            ACTUAL_PREVIOUS_TRANSLATIONS,
-            ACTUAL_STALE_AND_MISSING,
-            ACTUAL_MISSING_TRANSLATIONS,
-        ):
+        """根因已确认时才带 issue_key。
+
+        ``stale-output-success`` 只覆盖“上一版确实留在了盘上”这一类；
+        ``missing_translations``（连上一版都没有）与它可观察到的现象不同，
+        责任层相同但没有可指认的旧件，因此不带 issue_key。
+        """
+        if requested_actual in (ACTUAL_PREVIOUS_TRANSLATIONS, ACTUAL_STALE_AND_MISSING):
             return ISSUE_STALE_OUTPUT
         return None
 
@@ -824,6 +852,10 @@ class OperationFeedback:
                 return ACTUAL_TRANSCRIPTION_FAILED
             if self._stage == STAGE_TRANSLATION:
                 return ACTUAL_TRANSLATION_FAILED
+            # 写盘失败：已经提交了部分目标就是“部分提交”，一个都没提交才是
+            # “写入失败”。两件不同的事，因此两个不同的终态词。
+            if self._writers.get(ROLE_ORIGINAL, {}).get("result") == WRITER_COMMITTED:
+                return PUBLISHED_PARTIAL
             return ACTUAL_WRITE_FAILED
         requested = self._requested_actual()
         if requested in (
@@ -903,7 +935,6 @@ def _file_size(path: Path) -> Optional[int]:
 def begin_operation(
     *,
     audio_path: Any,
-    output_dir: Any,
     translate_requested: bool,
     force: bool,
     environ: Optional[Mapping[str, str]] = None,
@@ -929,7 +960,6 @@ def begin_operation(
         recorder,
         input_id=input_id,
         audio_path=audio_path,
-        output_dir=output_dir,
         requested_mode=mode,
         force=force,
     )

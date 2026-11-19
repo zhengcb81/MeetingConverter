@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +27,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[4]
 BASE = "b43a76a"
+
+#: pytest 的临时根与其下的绝对路径：收据里不留机器的绝对路径。
+_PYTEST_TMP = re.compile(r"[A-Za-z]:[\\/][^\s'\"\n]*pytest-of-[^\s'\"\n]*")
+_ABS_PATH = re.compile(r"[A-Za-z]:[\\/][^\s'\"\n]*")
+
+
+def scrub(text: str) -> str:
+    """把收据里的机器绝对路径换成占位词。"""
+    text = _PYTEST_TMP.sub("<PYTEST_TMP>", text)
+    return _ABS_PATH.sub("<ABS_PATH>", text)
+
 
 FIXTURE_COMMAND = (
     "python -B -m pytest -q -o addopts= -p no:cacheprovider "
@@ -105,7 +116,9 @@ def main() -> int:
             f"# worktree：git worktree add --detach <TMP>/base {BASE}\n\n"
         )
         (HERE / "base-commit-fixture-failures.txt").write_text(
-            header + fixture.stdout + fixture.stderr, encoding="utf-8", newline="\n"
+            header + scrub(fixture.stdout + fixture.stderr),
+            encoding="utf-8",
+            newline="\n",
         )
         print("fixture failures:", fixture.stdout.strip().splitlines()[-1])
 
@@ -121,7 +134,9 @@ def main() -> int:
             "# 说明：基线没有任何反馈适配器，因此外部无法分辨这一轮是否产出了译文。\n\n"
         )
         (HERE / "base-commit-stale-output.txt").write_text(
-            header + stale.stdout + stale.stderr, encoding="utf-8", newline="\n"
+            header + scrub(stale.stdout + stale.stderr),
+            encoding="utf-8",
+            newline="\n",
         )
         print(stale.stdout.strip())
         return 0
