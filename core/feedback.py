@@ -42,20 +42,13 @@ CLI 的 stdout 上，业务日志行本身不变。
     本仓没有用量收据，因此费用恒为 ``cost_unknown``，disposition 为
     ``unknown``。
 
-身份：``step_id`` 为 ``meeting-operation/<input_id>``，``input_id`` 是输入文件
-解析路径的散列——同一文件重投时沿用原 ID，同一批两个同名音频仍然可区分。
-``evidence_ref`` 为 ``mc-output/<input_id>`` 或 ``mc-output/<input_id>/<role>``，
-是本仓能解释的逻辑 ID。
+身份：每次真实调用有自己的 step，前缀保留不透明的输入标识。本轮开始和结束
+共用该 step。同一次运行里首次转录、随后跳过或再次转录分别占用不同 step。
+证据引用为 mc-output/<input_id> 或 mc-output/<input_id>/<role>。重投原 JSONL
+保留已经写出的所有身份。
 
-脱敏：details 记录不含绝对路径、音频名、逐字稿正文与凭证。原始异常留在本仓
-自己的日志里；details 只保留原生异常类别和脱敏后的一句话。
-
-时序：观察行先在内存里缓冲，只有在没有任何计时器打开时才写盘——否则旁路自身
-的写入耗时会混进发布出去的耗时字段，改变三个产物文件的字节。
-
-去重：同一 ``(owner, run_id, attempt_id, step_id, check_id)`` 且内容完全相同
-的行只写一次，重投不增加行；同一 step 的 check 内容不同（例如先转录后跳过）
-时仍然是两行，因为那是两件不同的事。
+详情只保留结构化阶段、角色及异常类型。完整异常由原生产日志负责。产物指纹
+属于可选取证，在业务计时结束后采集；探测失败时保留已知 writer 事实。
 """
 
 from __future__ import annotations
@@ -64,7 +57,7 @@ import hashlib
 import json
 import logging
 import os
-import re
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,7 +68,7 @@ logger = logging.getLogger(__name__)
 OBSERVATION_SCHEMA = "feedback-observation/1"
 DETAIL_SCHEMA = "meeting-converter-feedback-detail/1"
 OWNER = "meeting-converter"
-ADAPTER_VERSION = "meeting-converter-feedback/1.0.1"
+ADAPTER_VERSION = "meeting-converter-feedback/1.0.2"
 
 FEEDBACK_OUT_ENV = "RESEARCH_FEEDBACK_OUT"
 FEEDBACK_RUN_ID_ENV = "RESEARCH_FEEDBACK_RUN_ID"
@@ -129,6 +122,7 @@ WRITER_NOT_REQUESTED = "not_requested"
 WRITER_PREVIOUS_KEPT = "previous_kept"
 WRITER_ABSENT = "absent"
 WRITER_FAILED = "failed"
+WRITER_PRESENCE_UNKNOWN = "presence_unknown"
 
 ENGINE_STARTED = "engine_started"
 ENGINE_NOT_STARTED = "engine_not_started"
@@ -144,26 +138,6 @@ STAGE_OUTPUT = "output"
 # ── issue_key（本仓认可的规则签名）────────────────────────────────
 
 ISSUE_STALE_OUTPUT = "stale-output-success"
-
-# ── 脱敏 ─────────────────────────────────────────────────────────
-
-REDACTED_PATH = "<path>"
-REDACTED_INPUT = "<input>"
-MAX_ERROR_MESSAGE = 200
-
-#: 绝对路径形态：盘符路径、UNC 路径、以 / 开头的 POSIX 路径（含单段）。
-#: 只吃真正的绝对路径：普通文本里的 a/b、and/or、2024/2025、20%/30%、
-#: （/备注）这类不受影响。
-#: - 盘符前不能是字母数字，否则 error:/root 里的 r 会被当成盘符吃掉；
-#: - POSIX 的 / 前不能是词字符、百分号或括号（否则 20%/30%、（/备注）被吃），
-#:   且 / 后要像一段路径的开头（否则 /备注 这种叙述性斜杠被吃）。
-_ABSOLUTE_PATH = re.compile(
-    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/][^\s\"']+"  # 盘符路径
-    r"|\\\\[^\s\"']+"  # UNC
-    r"|(?<![\w.%()（）\[\]【】{}｛｝<>〈〉《》「」『』,，、;；])"
-    r"/(?=[A-Za-z0-9._~-])[^\s\"']*"  # POSIX 绝对路径
-)
-
 
 def _is_str(value: Any) -> bool:
     return isinstance(value, str) and value != ""
@@ -192,27 +166,11 @@ def input_identity(path: Any) -> str:
     return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
 
 
-def step_id_for(input_id: str) -> str:
-    """一次操作的 step 身份。"""
-    return f"meeting-operation/{input_id}"
-
-
 def evidence_ref_for(input_id: str, role: Optional[str] = None) -> str:
     """本仓能解释的逻辑证据引用。"""
     if role:
         return f"mc-output/{input_id}/{role}"
     return f"mc-output/{input_id}"
-
-
-def scrub_text(text: str, input_stem: str = "") -> str:
-    """把一段文本脱敏：绝对路径与输入名换成占位词。"""
-    if not text:
-        return ""
-    scrubbed = text
-    if input_stem and len(input_stem) >= 2:
-        scrubbed = scrubbed.replace(input_stem, REDACTED_INPUT)
-    scrubbed = _ABSOLUTE_PATH.sub(REDACTED_PATH, scrubbed)
-    return scrubbed[:MAX_ERROR_MESSAGE]
 
 
 def _observation_identity(record: Mapping[str, Any]) -> Tuple[str, ...]:
@@ -435,8 +393,14 @@ class FeedbackRecorder:
             return True
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write(line)
+            with path.open("a+b") as handle:
+                # Keep a truncated old record on a separate line from the next append.
+                handle.seek(0, os.SEEK_END)
+                if handle.tell():
+                    handle.seek(-1, os.SEEK_END)
+                    if handle.read(1) != b"\n":
+                        line = "\n" + line
+                handle.write(line.encode("utf-8"))
         except OSError as exc:
             self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
             return False
@@ -535,17 +499,16 @@ class OperationFeedback:
         recorder: Optional[FeedbackRecorder],
         *,
         input_id: str,
-        audio_path: Any,
         requested_mode: str,
         force: bool,
     ) -> None:
         self._recorder = recorder
         self.input_id = input_id
-        self.step_id = step_id_for(input_id)
-        self.audio_path = Path(audio_path)
+        self.step_id = f"meeting-operation/{input_id}/{uuid.uuid4().hex}" if recorder else ""
         self.requested_mode = requested_mode
         self.force = bool(force)
         self._writers: Dict[str, Dict[str, Any]] = {}
+        self._writer_paths: Dict[str, Path] = {}
         self._errors: List[Dict[str, Any]] = []
         self._engine_started = False
         self._stage = STAGE_TRANSCRIPTION
@@ -572,42 +535,40 @@ class OperationFeedback:
         self._engine_started = False
         self._emit_transcription_started(ENGINE_NOT_STARTED)
 
-    def note_writer_committed(self, role: str, path: Any) -> None:
-        """某个 writer 本轮成功替换了目标文件。"""
-        self._writers[role] = self._writer_entry(
-            role, WRITER_COMMITTED, path, this_round=True
-        )
+    def note_writer_committed(self, role: str, path: Path) -> None:
+        self._note_writer(role, WRITER_COMMITTED, path)
 
-    def note_writer_failed(self, role: str, path: Any, error: BaseException) -> None:
-        """某个 writer 抛错；目标文件保留旧字节。"""
-        self._writers[role] = self._writer_entry(
-            role, WRITER_FAILED, path, this_round=False
-        )
+    def note_writer_failed(self, role: str, path: Path, error: BaseException) -> None:
+        self._note_writer(role, WRITER_FAILED, path)
         self._note_error(role, error)
 
     def note_writer_not_requested(self, role: str) -> None:
-        """本轮的模式没有要求这个角色。"""
+        self._note_writer(role, WRITER_NOT_REQUESTED)
+
+    def note_writer_not_produced(self, role: str, path: Path) -> None:
+        self._note_writer(role, WRITER_PRESENCE_UNKNOWN, path)
+
+    def _note_writer(self, role: str, result: str, path: Optional[Path] = None) -> None:
+        if self._recorder is None:
+            return
         self._writers[role] = {
             "role": role,
-            "result": WRITER_NOT_REQUESTED,
-            "this_round": False,
+            "result": result,
+            "this_round": result == WRITER_COMMITTED,
             "sha256": None,
             "bytes": None,
         }
+        if path is not None:
+            self._writer_paths[role] = path
 
-    def note_writer_not_produced(self, role: str, path: Any) -> None:
-        """本轮没有产出这个角色：旧件仍在或根本没有。"""
-        exists = Path(path).exists()
-        self._writers[role] = self._writer_entry(
-            role,
-            WRITER_PREVIOUS_KEPT if exists else WRITER_ABSENT,
-            path,
-            this_round=False,
-        )
-
-    def note_reuse(self, reused: Mapping[str, Any]) -> None:
-        """本轮没有产出任何东西：复用了已有产物。"""
-        self._reused = dict(reused)
+    def note_reuse(self, translated: Path, bilingual: Path) -> None:
+        """The original file already passed the production reuse check."""
+        if self._recorder is not None:
+            self._reused = {
+                "original": True,
+                "translated": _has_regular_file(translated),
+                "bilingual": _has_regular_file(bilingual),
+            }
 
     def note_abort(self) -> None:
         """本轮被异常中止：终态是失败，不是部分完成。"""
@@ -622,18 +583,16 @@ class OperationFeedback:
         self._note_error(None, error)
 
     def _note_error(self, role: Optional[str], error: BaseException) -> None:
-        entry = {
-            "role": role,
-            "error_type": type(error).__name__,
-            "message": scrub_text(str(error), self.audio_path.stem),
-        }
-        for existing in self._errors:
-            if (
-                existing["error_type"] == entry["error_type"]
-                and existing["message"] == entry["message"]
-            ):
-                return
-        self._errors.append(entry)
+        if self._recorder is None:
+            return
+        error_type = type(error).__name__
+        if any(
+            item["stage"] == self._stage and item["error_type"] == error_type
+            and (role is None or item["role"] == role)
+            for item in self._errors
+        ):
+            return
+        self._errors.append({"stage": self._stage, "role": role, "error_type": error_type})
 
     # ── 观察 ──────────────────────────────────────────────────────
 
@@ -665,6 +624,7 @@ class OperationFeedback:
         if self._recorder is None:
             return
 
+        self._probe_writer_outputs()
         details = self._details_payload("finished", metrics=metrics)
         self._emit_writer_rows(details)
 
@@ -782,7 +742,10 @@ class OperationFeedback:
                     "check_id": f"{CHECK_WRITER_PREFIX}{role}",
                     "expected": expected,
                     "actual": actual,
-                    "disposition": "expected" if expected == actual else "deviation",
+                    "disposition": (
+                        "unknown" if actual == WRITER_PRESENCE_UNKNOWN
+                        else "expected" if expected == actual else "deviation"
+                    ),
                     "evidence_ref": evidence_ref_for(self.input_id, role),
                     "details": details,
                 }
@@ -839,6 +802,8 @@ class OperationFeedback:
                 if WRITER_PREVIOUS_KEPT in (translated, bilingual):
                     return ACTUAL_STALE_AND_MISSING
                 return ACTUAL_MISSING_TRANSLATIONS
+        if WRITER_PRESENCE_UNKNOWN in (translated, bilingual) and WRITER_FAILED not in (translated, bilingual):
+            return ACTUAL_UNKNOWN
         return ACTUAL_PARTIAL
 
     def _publication_actual(self) -> str:
@@ -872,18 +837,15 @@ class OperationFeedback:
         # 本轮没有产出译文：只剩上一版，或根本没有。
         return PUBLISHED_INCOMPLETE
 
-    def _writer_entry(
-        self, role: str, result: str, path: Any, *, this_round: bool
-    ) -> Dict[str, Any]:
-        target = Path(path)
-        exists = target.exists()
-        return {
-            "role": role,
-            "result": result,
-            "this_round": this_round,
-            "sha256": _file_digest(target) if exists else None,
-            "bytes": _file_size(target) if exists else None,
-        }
+    def _probe_writer_outputs(self) -> None:
+        # Gather optional evidence only after the business timers have stopped.
+        for role, path in self._writer_paths.items():
+            present = _has_regular_file(path)
+            entry = self._writers[role]
+            if entry["result"] == WRITER_PRESENCE_UNKNOWN and present is not None:
+                entry["result"] = WRITER_PREVIOUS_KEPT if present else WRITER_ABSENT
+            if present:
+                entry["sha256"], entry["bytes"] = _file_fingerprint(path)
 
     def _details_payload(
         self, phase: str, metrics: Optional[Mapping[str, Any]] = None
@@ -912,24 +874,26 @@ class OperationFeedback:
         return payload
 
 
-def _file_digest(path: Path) -> Optional[str]:
-    """一个文件的 sha256；读不到时为 None。"""
+def _has_regular_file(path: Path) -> Optional[bool]:
+    try:
+        return stat.S_ISREG(path.stat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return None
+
+
+def _file_fingerprint(path: Path) -> Tuple[Optional[str], Optional[int]]:
     try:
         digest = hashlib.sha256()
+        size = 0
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(65536), b""):
                 digest.update(chunk)
-        return digest.hexdigest()
+                size += len(chunk)
+        return digest.hexdigest(), size
     except OSError:
-        return None
-
-
-def _file_size(path: Path) -> Optional[int]:
-    """一个文件的字节数；读不到时为 None。"""
-    try:
-        return path.stat().st_size
-    except OSError:
-        return None
+        return None, None
 
 
 def begin_operation(
@@ -950,16 +914,15 @@ def begin_operation(
         logger.warning(f"反馈旁路不可用（不影响本次转录结果）: {type(exc).__name__}")
         recorder = None
     mode = MODE_TRANSLATED if translate_requested else MODE_ORIGINAL_ONLY
-    try:
-        input_id = input_identity(audio_path)
-    except Exception:
-        input_id = hashlib.sha256(
-            str(audio_path).encode("utf-8", "replace")
-        ).hexdigest()[:12]
+    input_id = ""
+    if recorder is not None:
+        try:
+            input_id = input_identity(audio_path)
+        except Exception:
+            input_id = hashlib.sha256(str(audio_path).encode("utf-8", "replace")).hexdigest()[:12]
     return OperationFeedback(
         recorder,
         input_id=input_id,
-        audio_path=audio_path,
         requested_mode=mode,
         force=force,
     )

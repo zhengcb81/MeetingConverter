@@ -1,5 +1,8 @@
 # MC-OUTPUT 交接 · F2-MC-OUTPUT 会议转录发布反馈
 
+> 以下是 b1acea5 作者交接的历史说明和样例摘录。ROOT 复核后的源码、实测和再生样例以本卡 [进度](progress.md#2026-11-19-root-组合验收) 与现行 receipts 为准。作者原样例可从 b1acea5 查询。
+
+
 **lane** `F2-MC-OUTPUT` · **owner** `meeting-converter` · **状态** 实现、独审、修复、复审均已完成；等待 ROOT 接收。
 
 ## 1. 身份与提交位置

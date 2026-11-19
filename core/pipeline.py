@@ -136,13 +136,7 @@ def transcribe_one(
     if not force and original_file.exists():
         logger.info(f"跳过 (已完成): {audio_path.name}")
         feedback.note_engine_not_started()
-        feedback.note_reuse(
-            {
-                "original": original_file.exists(),
-                "translated": translated_file.exists(),
-                "bilingual": bilingual_file.exists(),
-            }
-        )
+        feedback.note_reuse(translated_file, bilingual_file)
         feedback.finish()
         feedback.flush()
         return None
@@ -212,6 +206,7 @@ def transcribe_one(
                             )
                         except TranslationError as e:
                             logger.warning(f"翻译失败，跳过翻译文件: {e}")
+                            feedback.note_error(e)
                             translations = None
                             translation_failed = True
                 finally:

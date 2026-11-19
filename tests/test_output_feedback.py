@@ -229,9 +229,9 @@ class TestObservationShape:
         assert str(tmp_output_dir) not in blob
         assert str(audio) not in blob
         assert "Xiaomi" not in blob
-        # 异常类别保留，异常正文里的路径被脱敏
-        assert "OSError" in blob
-        assert "<path>" in blob
+        assert "写盘失败" not in blob
+        finished = next(row for row in read_rows(details) if row["phase"] == "finished")
+        assert finished["errors"] == [{"stage": "output", "role": "bilingual", "error_type": "OSError"}]
 
 
 # ── 正例 ─────────────────────────────────────────────────────────
@@ -839,23 +839,24 @@ class TestObservationIdentity:
                 row_for(step_rows, "requested-outputs")["actual"] == "original_current"
             )
 
-    def test_redelivery_reuses_the_original_step_id(
+    def test_reuse_has_its_own_step_under_the_same_attempt(
         self, engine, audio_file, tmp_output_dir, sidecar
     ):
         transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
-        first_step = only_step(sidecar)
         first_rows = read_rows(sidecar)
-
-        # 重投同一文件：沿用原 ID，不重跑引擎
-        transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
-        assert only_step(sidecar) == first_step
+        assert transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None) is None
         assert engine.transcribe.call_count == 1
 
-        # 上一轮的行原样保留；重投只补上这一轮自己的复用事实
         rows = read_rows(sidecar)
         assert rows[: len(first_rows)] == first_rows
-        reuse = [r for r in rows if r["check_id"] == "publication-outcome"]
-        assert [r["actual"] for r in reuse] == ["published_current", "reused_existing"]
+        starts = [row for row in rows if row["check_id"] == "action-started"]
+        terminal = [row for row in rows if row["check_id"] == "publication-outcome"]
+        assert len({row["step_id"] for row in starts}) == 2
+        assert [row["step_id"] for row in starts] == [row["step_id"] for row in terminal]
+        assert [row["actual"] for row in terminal] == ["published_current", "reused_existing"]
+        assert len({row["evidence_ref"] for row in terminal}) == 1
+        assert {row["attempt_id"] for row in terminal} == {"attempt-1"}
+        assert len(rows) == len({(row["step_id"], row["check_id"]) for row in rows})
 
     def test_reading_an_old_sidecar_does_not_increase_call_counts(
         self, engine, translator, audio_file, tmp_output_dir, sidecar
@@ -965,33 +966,99 @@ class TestPublicEntryIntegration:
             assert requested["actual"] == "original_translated_bilingual_current"
             assert row_for(step_rows, "publication-outcome")["actual"] == "published_current"
 
-    def test_redaction_cuts_paths_but_keeps_ordinary_text(self):
-        """脱敏只吃真正的绝对路径，普通文本里的斜杠不受影响。"""
-        from core.feedback import scrub_text
+    def test_exception_text_stays_out_of_the_feedback_details(
+        self, engine, audio_file, tmp_output_dir, sidecar
+    ):
+        secret_marker = "token=fake-only-value private-transcript"
+        failure = RuntimeError(secret_marker)
+        engine.transcribe.side_effect = failure
+        with pytest.raises(RuntimeError) as raised:
+            transcribe_one(engine, audio_file, tmp_output_dir)
+        assert raised.value is failure
+        details = sidecar.with_name(sidecar.name + ".details.jsonl")
+        assert secret_marker not in details.read_text(encoding="utf-8")
+        finished = next(row for row in read_rows(details) if row["phase"] == "finished")
+        assert finished["errors"] == [{"stage": "transcription", "role": None, "error_type": "RuntimeError"}]
 
-        for leaked in (
-            r"C:\Users\zzz\audio\meeting.mp3",
-            "D:/data/audio/meeting.mp3",
-            "\\\\fileserver\\share\\audio\\meeting.mp3",
-            "/home/user/audio/meeting.mp3",
-            "/etc/passwd",
-            "/root",
-            "error:/root/x",
-        ):
-            assert "<path>" in scrub_text(leaked), leaked
-            assert "meeting" not in scrub_text(leaked)
+    def test_truncated_sidecar_tail_cannot_consume_the_next_start(
+        self, engine, audio_file, tmp_output_dir, sidecar
+    ):
+        sidecar.parent.mkdir()
+        fragment = b'{"truncated":'
+        sidecar.write_bytes(fragment)
+        detail_path = sidecar.with_name(sidecar.name + ".details.jsonl")
+        detail_path.write_bytes(fragment)
 
-        for prose in (
-            "a/b",
-            "and/or",
-            "2024/2025",
-            "成本/收入比",
-            "20%/30%",
-            "（/备注）",
-            "MD/PhD",
-            "12/25/2026",
-        ):
-            assert scrub_text(prose) == prose, prose
+        transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=None)
+
+        old, *lines = sidecar.read_bytes().splitlines()
+        assert old == fragment
+        observations = [json.loads(line) for line in lines]
+        assert observations[0]["check_id"] == "action-started"
+        assert observations[-1]["check_id"] == "publication-outcome"
+        old, *lines = detail_path.read_bytes().splitlines()
+        assert old == fragment
+        details = {row["details_id"] for row in map(json.loads, lines)}
+        assert all(row["details_ref"] in details for row in observations)
+
+    def test_output_directory_is_not_an_older_translation(
+        self, engine, translator, audio_file, tmp_output_dir, sidecar
+    ):
+        (tmp_output_dir / "meeting_翻译.txt").mkdir()
+        translator.translate_paragraphs.side_effect = TranslationError("offline provider failure")
+
+        assert transcribe_one(engine, audio_file, tmp_output_dir, translator_obj=translator) is not None
+
+        rows = rows_of(sidecar, only_step(sidecar))
+        outputs = row_for(rows, "requested-outputs")
+        assert outputs["actual"] == "missing_translations"
+        assert "issue_key" not in outputs
+
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_optional_probe_error_cannot_turn_reuse_into_business_failure(
+        self, enabled, engine, audio_file, tmp_output_dir, sidecar, monkeypatch
+    ):
+        write_old_outputs(tmp_output_dir)
+        if not enabled:
+            monkeypatch.delenv("RESEARCH_FEEDBACK_OUT")
+        original_stat = Path.stat
+        probes = []
+
+        def stat(path, *args, **kwargs):
+            if path == tmp_output_dir / "meeting_翻译.txt":
+                probes.append(path)
+                raise PermissionError("unreadable optional output")
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", stat)
+        assert transcribe_one(engine, audio_file, tmp_output_dir) is None
+        engine.transcribe.assert_not_called()
+        if enabled:
+            assert len(probes) == 1
+            details = sidecar.with_name(sidecar.name + ".details.jsonl")
+            finished = next(row for row in read_rows(details) if row["phase"] == "finished")
+            assert finished["reused_outputs"]["translated"] is None
+            assert row_for(read_rows(sidecar), "publication-outcome")["actual"] == "reused_existing"
+        else:
+            assert not probes
+            assert not sidecar.exists()
+
+    def test_disabled_observation_never_reopens_committed_output(
+        self, engine, audio_file, tmp_output_dir, monkeypatch
+    ):
+        monkeypatch.delenv("RESEARCH_FEEDBACK_OUT", raising=False)
+        native_open = Path.open
+        probes = []
+
+        def open_output(path, mode="r", *args, **kwargs):
+            if path == tmp_output_dir / "meeting_原文.txt" and mode == "rb":
+                probes.append(path)
+            return native_open(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_output)
+        assert transcribe_one(engine, audio_file, tmp_output_dir) is not None
+        assert (tmp_output_dir / "meeting_原文.txt").is_file()
+        assert not probes
 
     def test_details_ref_is_absent_when_the_details_never_landed(self, tmp_path):
         """details 写不进去时不写 details_ref：不留下悬挂引用。"""

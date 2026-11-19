@@ -11,8 +11,8 @@
 - ``sample-stale.jsonl``        —— 翻译失败，原文是本轮新产物，译文保留上一版。
 - ``sample-started-only.jsonl`` —— 引擎启动后被中止：只有开始行，没有可信终态。
 
-另外 ``sample-replay.jsonl`` 演示重放：同一输入重投沿用原 step_id，且不新增
-引擎/翻译调用。
+另外 ``sample-replay.jsonl`` 演示同一输入的首次转录和随后复用。
+它们有独立的 step 和共同的证据引用。原侧车可原样重投，复用不新增引擎或翻译调用。
 
 运行不接触网络、凭证或真实音频；所有临时文件都写在本脚本专属的临时目录里，
 结束时清理。
@@ -152,7 +152,7 @@ def scenario_started_only(root: Path) -> Path:
 
 
 def scenario_replay(root: Path) -> Path:
-    """重放：同一输入重投沿用原 step_id，且不新增引擎/翻译调用。"""
+    """同一输入的首次转录与随后复用是不同步骤，原侧车可原样重投。"""
     sidecar = root / "replay.jsonl"
     use_sidecar(sidecar, "mc-sample-replay", "attempt-1")
     out = root / "out-replay"

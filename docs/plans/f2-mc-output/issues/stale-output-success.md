@@ -143,9 +143,6 @@ that stay `expected`:
 
 ## Consumer re-verification
 
-- state: pending
-- who: the consumer that found the cause (ROOT) re-runs the original scenario on the
-  fixed version and confirms that the translation-failure run now reports
-  `previous_translations_only` instead of being indistinguishable from a complete
-  publication. This repository cannot close that step on the consumer's behalf; the
-  cross-repository check belongs to ROOT.
+- state: verified for publication observability by ROOT in the isolated MC → feedback loop test.
+- evidence: the published-output integration test in CWP executes the owner entrypoint using synthetic audio and local stubs. It checks exact reuse of existing output bytes, forces a translation failure, checks unchanged translation and bilingual files, then follows the emitted evidence and details references. ROOT sees a separate publication outcome of published_incomplete and a requested-outputs observation of previous_translations_only. The four owner receipts also replay without conflicts.
+- scope: adapter meeting-converter-feedback/1.0.2. ROOT's automatic MC triage and durable owner report route remain pending. The diagnostics are verified independently of that operational rollout.
