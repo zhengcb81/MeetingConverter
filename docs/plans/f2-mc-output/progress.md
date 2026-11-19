@@ -93,22 +93,33 @@
   | N-i | 没写完的旁路以 `cost-receipt` 收尾，形状怪 | 终态行改为最后写：没写完一定以“没有终态”收尾 |
   | N-l | `progress.md` 的“ruff 干净”措辞不准 | 改为“本卡改动文件 ruff 无告警；仓内既有 54 项（基线 58）” |
 
-- 全量 293 过；本卡改动文件 ruff 无告警。
+- 该轮收尾实测：全量 293 过；本卡改动文件 ruff 无告警。（后续又加了 4 个回归
+  用例，最终交付实测见下一节。）
 
-## 待办（恢复点）
+## 交付状态
 
-1. 写 `docs/plans/f2-mc-output/handoff.md`（含机器可读 JSON 摘要、实际测试
-   输出的最小 JSONL 示例、复现命令、清理收据）。
-2. 提交剩余改动并推送同名施工分支。
-   **注意**：Mimosa 提交前门禁拦的是主仓既有文件的 14 个 high（本卡改动 0
-   命中），`MIMOSA_NO_GIT_GATE=1` 等命令行前缀够不到钩子（它读宿主进程环境），
-   因此提交需要在 ZCode 之外的终端执行：
+- 交付树 `8806ff4`：链路为 `b43a76a`（base）→ `6385f11`（首版实施）→
+  `779aa1b`（第一轮独审修复）→ `8806ff4`（第二/三轮独审修复 + 交接文档）。
+- `docs/plans/f2-mc-output/handoff.md` 已写好，机器可读摘要里的
+  `implementation` / `reviewed_commit` 均为 `8806ff4`。
+- 分支 `codex/f2-mc-output` 尚未推送；ROOT 负责接收并并入主线。
 
-   ```powershell
-   cd C:\Users\郑曾波\Projects\_harness_worktrees\f2f\mc
-   git add -A
-   git commit -F <消息文件>
-   ```
+### 提交门禁（本卡的提交是怎么落的）
+
+Mimosa 提交前 L3 门禁拦的是**主仓既有文件**的 high（`tests/conftest.py` 的假凭据
+字面量、`compare_engines.py` / `company_manager.py` 等的 `open` 路径穿越、
+`translator.py` / `engines/mimo.py` 调 LLM API 的 SSRF 形态），本卡改动文件在同一次
+审计下 0 命中。`MIMOSA_NO_GIT_GATE=1` 等开关读的是 ZCode 宿主进程环境，命令行前缀
+够不到钩子（它拦的是 Bash 工具调用本身），因此本卡的提交是在 ZCode 之外的终端里
+执行的。**这些是既有发现，不在本卡写入范围内，未在本卡修复。**
+
+## 待办（ROOT 侧）
+
+1. 读取 `<RESEARCH_FEEDBACK_OUT>` 与 `<RESEARCH_FEEDBACK_OUT>.details.jsonl` 两个
+   文件，做跨仓组合验收。
+2. 在修复版上重跑原场景，关闭 `issues/stale-output-success.md` 的 consumer
+   re-verification（当前 pending）。
+3. 样本 `evidence_ref` 由路径派生、随运行变化，复验时按同一规则重算。
 
 ## 2026-11-19 第三轮独立复审与收尾
 

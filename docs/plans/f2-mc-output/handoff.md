@@ -9,14 +9,15 @@
 | 工作目录 | `C:/Users/郑曾波/Projects/_harness_worktrees/f2f/mc` |
 | 分支 | `codex/f2-mc-output` |
 | base SHA | `b43a76a3cdc25928a75e583b65a5a706802985ce`（`origin/master`） |
-| 实施 SHA | `6385f11`（首版实施） → `779aa1b`（独审发现修复） |
-| 复审 SHA | `779aa1b` + 本仓已复核的第二轮修复（即本文件所在提交之前的最后一次代码提交；见 §5） |
+| 实施 SHA | `8806ff4`（交付树；链路为 `6385f11` 首版实施 → `779aa1b` 第一轮独审修复 → `8806ff4` 第二/三轮独审修复 + 交接文档） |
+| 复审 SHA | `8806ff4`（三轮独立复审均覆盖到这棵树，逐项关闭表见 §5） |
 | 提交位置 | 本分支 `codex/f2-mc-output`，未推送、未并入 `master`；ROOT 负责接收并并入主线 |
 | 本仓 PWF | `docs/plans/f2-mc-output/`（`task_plan.md` / `findings.md` / `progress.md` / `issues/` / `receipts/`） |
 
-> 说明：`base` 与 `implementation` 是可直接 `git show` 的实 SHA。复审针对的树 =
-> `779aa1b` + 第二轮修复（改动清单见 §5 的逐项关闭表），两者之间的差异全部在
-> 本仓工作区内，可用 `git diff 779aa1b -- <path>` 独立复核。
+> 说明：`base`、`implementation`、`reviewed_commit` 都是可直接 `git show` 的实
+> SHA。三轮复审覆盖到 `8806ff4` 这棵树；每轮的发现与关闭方式见 §5 的三张表。
+> 各轮之间的差异可用 `git diff 6385f11..779aa1b`、`git diff 779aa1b..8806ff4`
+> 独立复核。
 
 ## 2. 交付了什么
 
@@ -277,5 +278,5 @@ node "C:/Users/郑曾波/.zcode/cli/plugins/cache/zcode-plugins-official/mimosa/
 ## 9. 机器摘要
 
 ```json
-{"lane":"F2-MC-OUTPUT","owner":"meeting-converter","base":"b43a76a3cdc25928a75e583b65a5a706802985ce","implementation":"779aa1b","reviewed_commit":"779aa1b","branch":"codex/f2-mc-output","review_ref":"docs/plans/f2-mc-output/handoff.md","tests":[{"command":"python -B -m pytest -q -o addopts= -p no:cacheprovider tests/test_output.py tests/test_pipeline.py tests/test_transcribe_integration.py tests/test_output_feedback.py","result":"127 passed, 0 failed, 0 skipped"},{"command":"python -B -m pytest -q -o addopts= -p no:cacheprovider","result":"297 passed, 0 failed, 0 skipped"},{"command":"python -B -m ruff check core/feedback.py core/pipeline.py tests/test_output_feedback.py tests/test_transcribe_integration.py","result":"All checks passed!"}],"sample_refs":["docs/plans/f2-mc-output/receipts/sample-success.jsonl","docs/plans/f2-mc-output/receipts/sample-stale.jsonl","docs/plans/f2-mc-output/receipts/sample-started-only.jsonl","docs/plans/f2-mc-output/receipts/sample-replay.jsonl","docs/plans/f2-mc-output/receipts/red-output-feedback.txt"],"cleanup":"两处 .coverage 字节未变；收据脚本的临时目录与临时 worktree 全部移除；主仓 HEAD 仍 b43a76a 且只有既有的 M .coverage 与插件状态目录 .mimosa/","remaining":["ROOT 侧跨仓组合验收：读取旁路与 .details.jsonl 两个文件并登记 issue","消费方复验 stale-output-success 卡（当前 pending）","样本 evidence_ref 由路径派生，复验时按同一规则重算","本卡无用量收据，费用恒为 cost_unknown"]}
+{"lane":"F2-MC-OUTPUT","owner":"meeting-converter","base":"b43a76a3cdc25928a75e583b65a5a706802985ce","implementation":"8806ff4","reviewed_commit":"8806ff4","branch":"codex/f2-mc-output","review_ref":"docs/plans/f2-mc-output/handoff.md","tests":[{"command":"python -B -m pytest -q -o addopts= -p no:cacheprovider tests/test_output.py tests/test_pipeline.py tests/test_transcribe_integration.py tests/test_output_feedback.py","result":"127 passed, 0 failed, 0 skipped"},{"command":"python -B -m pytest -q -o addopts= -p no:cacheprovider","result":"297 passed, 0 failed, 0 skipped"},{"command":"python -B -m ruff check core/feedback.py core/pipeline.py tests/test_output_feedback.py tests/test_transcribe_integration.py","result":"All checks passed!"}],"sample_refs":["docs/plans/f2-mc-output/receipts/sample-success.jsonl","docs/plans/f2-mc-output/receipts/sample-stale.jsonl","docs/plans/f2-mc-output/receipts/sample-started-only.jsonl","docs/plans/f2-mc-output/receipts/sample-replay.jsonl","docs/plans/f2-mc-output/receipts/red-output-feedback.txt"],"cleanup":"两处 .coverage 字节未变；收据脚本的临时目录与临时 worktree 全部移除；主仓 HEAD 仍 b43a76a 且只有既有的 M .coverage 与插件状态目录 .mimosa/","remaining":["ROOT 侧跨仓组合验收：读取旁路与 .details.jsonl 两个文件并登记 issue","消费方复验 stale-output-success 卡（当前 pending）","样本 evidence_ref 由路径派生，复验时按同一规则重算","本卡无用量收据，费用恒为 cost_unknown"]}
 ```
