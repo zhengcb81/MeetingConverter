@@ -47,8 +47,8 @@ CLI 的 stdout 上，业务日志行本身不变。
 证据引用为 mc-output/<input_id> 或 mc-output/<input_id>/<role>。重投原 JSONL
 保留已经写出的所有身份。
 
-详情只保留结构化阶段、角色及异常类型。完整异常由原生产日志负责。产物指纹
-属于可选取证，在业务计时结束后采集；探测失败时保留已知 writer 事实。
+详情只保留结构化阶段、角色及异常类型。完整异常由原生产日志负责。本轮提交
+的指纹由原子 writer 提供。旧件诊断在业务计时结束后读取，读取失败时保留已知事实。
 """
 
 from __future__ import annotations
@@ -63,12 +63,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from core.output import WrittenOutput
+
 logger = logging.getLogger(__name__)
 
 OBSERVATION_SCHEMA = "feedback-observation/1"
 DETAIL_SCHEMA = "meeting-converter-feedback-detail/1"
 OWNER = "meeting-converter"
-ADAPTER_VERSION = "meeting-converter-feedback/1.0.2"
+ADAPTER_VERSION = "meeting-converter-feedback/1.0.3"
 
 FEEDBACK_OUT_ENV = "RESEARCH_FEEDBACK_OUT"
 FEEDBACK_RUN_ID_ENV = "RESEARCH_FEEDBACK_RUN_ID"
@@ -535,8 +537,18 @@ class OperationFeedback:
         self._engine_started = False
         self._emit_transcription_started(ENGINE_NOT_STARTED)
 
-    def note_writer_committed(self, role: str, path: Path) -> None:
-        self._note_writer(role, WRITER_COMMITTED, path)
+    @property
+    def enabled(self) -> bool:
+        return self._recorder is not None
+
+    def note_writer_committed(self, role: str, witness: Optional[WrittenOutput]) -> None:
+        if self._recorder is None:
+            return
+        self._note_writer(role, WRITER_COMMITTED)
+        if witness is not None:
+            self._writers[role].update(
+                sha256=witness.sha256, bytes=witness.size, fingerprint_source="committed_writer",
+            )
 
     def note_writer_failed(self, role: str, path: Path, error: BaseException) -> None:
         self._note_writer(role, WRITER_FAILED, path)

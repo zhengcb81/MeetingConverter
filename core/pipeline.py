@@ -231,13 +231,13 @@ def transcribe_one(
                     feedback.set_stage(STAGE_OUTPUT)
                     orig = output_dir / f"{stem}_原文.txt"
                     try:
-                        write_original(orig, paragraphs, meta, timestamps)
+                        witness = write_original(orig, paragraphs, meta, timestamps, receipt=feedback.enabled)
                     except BaseException as exc:
                         # 连 BaseException 也记这一行：写盘中被打断时消费方
                         # 仍能看到这个角色的失败事实，异常照常向上抛。
                         feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
                         raise
-                    feedback.note_writer_committed(ROLE_ORIGINAL, orig)
+                    feedback.note_writer_committed(ROLE_ORIGINAL, witness)
                     logger.info(f"  原文: {orig}")
 
                     if translations is None:
@@ -252,20 +252,20 @@ def transcribe_one(
                     else:
                         tr = output_dir / f"{stem}_翻译.txt"
                         try:
-                            write_translated(tr, paragraphs, translations, meta, timestamps)
+                            witness = write_translated(tr, paragraphs, translations, meta, timestamps, receipt=feedback.enabled)
                         except BaseException as exc:
                             feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
                             raise
-                        feedback.note_writer_committed(ROLE_TRANSLATED, tr)
+                        feedback.note_writer_committed(ROLE_TRANSLATED, witness)
                         logger.info(f"  翻译: {tr}")
 
                         bi = output_dir / f"{stem}_中英对照.txt"
                         try:
-                            write_bilingual(bi, paragraphs, translations, meta, timestamps)
+                            witness = write_bilingual(bi, paragraphs, translations, meta, timestamps, receipt=feedback.enabled)
                         except BaseException as exc:
                             feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
                             raise
-                        feedback.note_writer_committed(ROLE_BILINGUAL, bi)
+                        feedback.note_writer_committed(ROLE_BILINGUAL, witness)
                         logger.info(f"  对照: {bi}")
             finally:
                 # writer 抛错时输出耗时照样记账：失败路径的步骤日志因此仍然

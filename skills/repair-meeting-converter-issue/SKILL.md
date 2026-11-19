@@ -43,7 +43,7 @@ the consumer re-verification state.
 
 The sidecar rows carry stable result words; the numbers, digests and the redacted
 error detail stay in this repository's own `*.details.jsonl` step log. The step
-identity is `meeting-operation/<input_id>`; the evidence reference is
+identity is `meeting-operation/<input_id>/<invocation_id>`; the evidence reference is
 `mc-output/<input_id>` or `mc-output/<input_id>/<role>`.
 
 | check_id | expected | actual words |
@@ -86,6 +86,8 @@ surviving old file to point at.
 Two files are written per run: the sidecar itself (`RESEARCH_FEEDBACK_OUT`) and
 its sibling `*.details.jsonl` step log. A consumer that collects the observation
 has to collect both.
+
+For an evidenced stale translation publication, the [public F4 port](../../docs/plans/f2-mc-output/runtime.md) can reconstruct the publication receipt and verify the original occurrence offline. Other causes continue below.
 
 ## Procedure
 

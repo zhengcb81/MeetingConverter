@@ -1155,3 +1155,28 @@ class TestPublicEntryIntegration:
         assert cost["expected"] == "cost_unknown"
         assert cost["actual"] == "cost_unknown"
         assert cost["disposition"] == "unknown"
+
+
+def test_committed_output_fingerprint_is_not_taken_from_a_later_writer(
+    engine, audio_file, tmp_output_dir, sidecar, monkeypatch
+):
+    from hashlib import sha256
+
+    from core.output import write_original
+
+    committed = []
+
+    def replaced_after_commit(path, *args, **kwargs):
+        result = write_original(path, *args, **kwargs)
+        committed.append(path.read_bytes())
+        path.write_bytes(b"subsequent writer to the same destination")
+        return result
+
+    monkeypatch.setattr("core.pipeline.write_original", replaced_after_commit)
+    transcribe_one(engine, audio_file, tmp_output_dir)
+    details = sidecar.with_name(sidecar.name + ".details.jsonl")
+    finished = next(row for row in read_rows(details) if row["phase"] == "finished")
+    written, = [row for row in finished["writers"] if row["role"] == "original"]
+    assert written["sha256"] == sha256(committed[0]).hexdigest()
+    assert written["bytes"] == len(committed[0])
+    assert written["fingerprint_source"] == "committed_writer"

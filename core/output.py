@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import os
 import tempfile
+from hashlib import sha256
 from pathlib import Path
-from typing import List
+from typing import List, NamedTuple, Optional
 
 from core.formatter import fmt_ts
+
+
+class WrittenOutput(NamedTuple):
+    sha256: str
+    size: int
 
 
 class OutputCountMismatchError(ValueError):
@@ -95,12 +101,19 @@ def _render_bilingual(
     return "".join(lines)
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
+def _atomic_write_text(path: Path, content: str, *, receipt: bool = False) -> Optional[WrittenOutput]:
     """把 content 原子写入 path：同目录临时文件 flush/close 成功后 os.replace。
 
     临时文件与目标同目录（同文件系统，replace 原子）。写入或替换失败时
     尽力删除临时文件并原样保留目标旧字节；替换成功后临时文件即目标文件。
     """
+    witness = None
+    if receipt:
+        # The writer below uses UTF-8 and newline="", so these bytes are
+        # exactly the file committed by this invocation's atomic replace.
+        encoded = content.encode("utf-8")
+        witness = WrittenOutput(sha256(encoded).hexdigest(), len(encoded))
+        del encoded
     path = Path(path)
     tmp: Path | None = None
     handle = None
@@ -121,6 +134,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
         handle = None
         os.replace(tmp, path)
         tmp = None
+        return witness
     except BaseException:
         if handle is not None and not handle.closed:
             try:
@@ -145,10 +159,12 @@ def write_original(
     paragraphs: list,
     meta: dict,
     timestamps: bool = False,
-) -> None:
+    *,
+    receipt: bool = False,
+) -> Optional[WrittenOutput]:
     """写入原文文件。渲染失败或写盘失败都不改动目标旧文件。"""
     content = _render_original(paragraphs, meta, timestamps)
-    _atomic_write_text(Path(path), content)
+    return _atomic_write_text(Path(path), content, receipt=receipt)
 
 
 def write_translated(
@@ -157,10 +173,12 @@ def write_translated(
     translations: List[str],
     meta: dict,
     timestamps: bool = False,
-) -> None:
+    *,
+    receipt: bool = False,
+) -> Optional[WrittenOutput]:
     """写入翻译文件。段落数与译文数不一致时在任何写盘前抛错。"""
     content = _render_translated(paragraphs, translations, meta, timestamps)
-    _atomic_write_text(Path(path), content)
+    return _atomic_write_text(Path(path), content, receipt=receipt)
 
 
 def write_bilingual(
@@ -169,7 +187,9 @@ def write_bilingual(
     translations: List[str],
     meta: dict,
     timestamps: bool = False,
-) -> None:
+    *,
+    receipt: bool = False,
+) -> Optional[WrittenOutput]:
     """写入中英对照文件。段落数与译文数不一致时在任何写盘前抛错。"""
     content = _render_bilingual(paragraphs, translations, meta, timestamps)
-    _atomic_write_text(Path(path), content)
+    return _atomic_write_text(Path(path), content, receipt=receipt)
