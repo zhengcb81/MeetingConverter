@@ -2,6 +2,12 @@
 
 总控接原始转录发布观察。MC 自己核对同一发生的终态和已保存的 writer 详情。从已确认有旧译文的偏差重建可消费的发布清单。清单列出原操作真正提交的角色与内容指纹，同时保留旧件、缺件及原终态。转录、翻译、旧产物和费用账单由原任务继续负责。
 
+## 2026-11-20 本机独立复验
+
+正式 MeetingConverter 工作目录的运行脚本来自 `master@8b8e574f6162c6011890ce52b7383e796958aae1`。真实配置核对了分诊、修理、复验、回告四个执行路由及原作业对账路由。四个执行路由共用只读 `get-action`，宿主 30 秒接收单个 owner 命令结果。原作业不存在时本机实际对账回 unknown，查原动作回空对象，配置的本仓回执库未写入。
+
+在该正式代码根执行总控 `test_feedback_f4_mc_control.py` 和 `test_feedback_f4_mc_intake.py`，两项通过。原场景只证明本次原语言文件的 writer 指纹，旧译文件登记为保留件。分别在修理与回告事务落盘后强退，两次并发恢复查回同一 action、原请求和版本。原文本字节及写入时间核对一致。恢复和重复消费阶段转录、翻译各新增 0 次，历史无收据仍保留未知。复验使用隔离样例与状态库。
+
 ## 入口
 
 从本仓使用 `python -B feedback_owner.py --db DB --sidecar FILE COMMAND`。可重复 `--sidecar`，或为运维设置 `--sidecar-dir DIR` 读取目录下的原始 JSONL（同名 `.details.jsonl` 作详情）。ROOT 将同一原始侧车作为 `tick` 或 `recover` 的输入。每个 producer 调用使用独占的 JSONL。部署可将其放在本仓已有的 `output/.feedback/observations`，把小型回执库放进 `output/.feedback/owner.sqlite`。部署保持原生业务入口与各模块状态独立。

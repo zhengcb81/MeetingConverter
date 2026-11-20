@@ -1,10 +1,10 @@
 # F2-MC-OUTPUT · 会议转录与发布反馈
 
-**可开工。** 一次任务只在本卡工作树写入。反馈旁路上线后，ROOT 可区分一次真实转录、跳过以及译文或对照稿只保留了旧版本。
+**已交付并接入本机。** 历史施工范围与验收步骤保留下文。实际使用、负责范围和复验见 [F4 运行端口](runtime.md)。
 
 | 项目 | 值 |
 |---|---|
-| 工作目录 | C:/Users/郑曾波/Projects/_harness_worktrees/f2f/mc |
+| 原施工目录 | C:/Users/郑曾波/Projects/_harness_worktrees/f2f/mc |
 | 分支 | `codex/f2-mc-output` |
 | 已核基线 | `b43a76a3cdc25928a75e583b65a5a706802985ce`（`origin/master`） |
 | PWF 选择器 | PowerShell 下设置 `$env:PLAN_ID='f2-mc-output'`、`$env:PWF_PLAN_ROOT='docs/plans'` |
