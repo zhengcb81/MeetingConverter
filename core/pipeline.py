@@ -18,6 +18,7 @@ from core.feedback import (
 from core.formatter import fmt_ts
 from core.output import write_bilingual, write_original, write_translated
 from engines.base import Segment
+from engines.fallback import FallbackEngine
 from exceptions import TranslationError
 from metrics import Timer, TranscribeMetrics
 
@@ -101,6 +102,9 @@ def transcribe_one(
     merge_gap_sec: float = 2.0,
     paragraph_max_chars: int = 2000,
     force: bool = False,
+    translate_requested: Optional[bool] = None,
+    translator_ready: Optional[bool] = None,
+    translator_error_type: Optional[str] = None,
 ) -> Optional[dict]:
     """转写单个音频文件，返回结果摘要或 None（跳过时）。
 
@@ -117,6 +121,11 @@ def transcribe_one(
         merge_gap_sec: 段落合并间隔（秒）
         paragraph_max_chars: 段落最大字符数
         force: 是否强制重新处理
+        translate_requested: 用户是否请求了翻译；缺省时按旧口径从翻译器对象
+            是否存在推导。显式传入时，翻译器缺席不再被当成主动关闭翻译。
+        translator_ready: 翻译器是否真的创建成功（请求了翻译而创建失败时为
+            False，反馈据此区分"翻译未运行"与"翻译运行了但失败"）。
+        translator_error_type: 翻译器创建失败的脱敏异常类别。
 
     Returns:
         结果摘要 dict 或 None（文件已存在且未 force）
@@ -126,9 +135,17 @@ def transcribe_one(
     translated_file = output_dir / f"{stem}_翻译.txt"
     bilingual_file = output_dir / f"{stem}_中英对照.txt"
 
+    if translate_requested is None:
+        translate_requested = translator_obj is not None
+    if translator_ready is None:
+        translator_ready = translator_obj is not None
+    translator_unavailable = bool(translate_requested) and not translator_ready
+
     feedback = begin_operation(
         audio_path=audio_path,
-        translate_requested=translator_obj is not None,
+        translate_requested=translate_requested,
+        translator_ready=translator_ready,
+        translator_error_type=translator_error_type,
         force=force,
     )
     feedback.start()
@@ -182,6 +199,8 @@ def transcribe_one(
                 # 引擎抛错时耗时照样记账：失败路径的步骤日志说得清工作了多久，
                 # 消费方因此能区分“立刻失败”与“干了一会儿才失败”。
                 metrics.stt_elapsed = stt_timer.elapsed
+            # 主失败/回退事实在计时器关闭后取走：只搬内存结构，不占计时区间。
+            _drain_engine_events(engine, feedback)
             metrics.duration = duration
             logger.info(f"转写完成: {len(paragraphs)} 段, {stt_timer.elapsed:.1f}秒")
 
@@ -241,12 +260,18 @@ def transcribe_one(
                     logger.info(f"  原文: {orig}")
 
                     if translations is None:
-                        logger.info("  未启用翻译，跳过翻译和中英对照文件")
                         if translation_failed:
                             # 本轮没有产出译文与对照：旧件仍在，或根本没有。
+                            logger.info("  翻译失败，跳过翻译和中英对照文件")
                             feedback.note_writer_not_produced(ROLE_TRANSLATED, translated_file)
                             feedback.note_writer_not_produced(ROLE_BILINGUAL, bilingual_file)
+                        elif translator_unavailable:
+                            # 翻译被请求但翻译器没能创建：翻译从未运行。
+                            logger.info("  翻译未运行（翻译器不可用），跳过翻译和中英对照文件")
+                            feedback.note_writer_not_run(ROLE_TRANSLATED)
+                            feedback.note_writer_not_run(ROLE_BILINGUAL)
                         else:
+                            logger.info("  未启用翻译，跳过翻译和中英对照文件")
                             feedback.note_writer_not_requested(ROLE_TRANSLATED)
                             feedback.note_writer_not_requested(ROLE_BILINGUAL)
                     else:
@@ -278,6 +303,7 @@ def transcribe_one(
     except Exception as exc:
         # 异常终态是可知的：按阶段给出失败原因。
         metrics.total_elapsed = total_timer.elapsed
+        _drain_engine_events(engine, feedback)
         feedback.note_abort()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))
@@ -285,6 +311,7 @@ def transcribe_one(
     except BaseException as exc:
         # 被中止：没有可信终态，终态保留 unknown。
         metrics.total_elapsed = total_timer.elapsed
+        _drain_engine_events(engine, feedback)
         feedback.mark_unknown()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))
@@ -306,6 +333,21 @@ def transcribe_one(
 
 
 # ── 反馈辅助 ──────────────────────────────────────────────────────
+
+
+def _drain_engine_events(engine, feedback) -> None:
+    """取走引擎包装层（FallbackEngine）的降级事件，交给反馈投影。
+
+    只有真实的 FallbackEngine 才有事件流：测试替身与其他引擎一律跳过。
+    """
+    if not isinstance(engine, FallbackEngine):
+        return
+    try:
+        events = engine.drain_engine_events()
+    except Exception:
+        return
+    if events:
+        feedback.note_engine_events(events)
 
 
 def _metric_snapshot(metrics: TranscribeMetrics) -> dict:

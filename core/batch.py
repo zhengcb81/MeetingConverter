@@ -56,6 +56,9 @@ def run_batch(
     merge_gap_sec: float = 2.0,
     paragraph_max_chars: int = 2000,
     force: bool = False,
+    translate_requested: Optional[bool] = None,
+    translator_ready: Optional[bool] = None,
+    translator_error_type: Optional[str] = None,
 ) -> dict:
     """批量转写音频文件，返回统计信息。
 
@@ -72,10 +75,17 @@ def run_batch(
         merge_gap_sec: 段落合并间隔
         paragraph_max_chars: 段落最大字符数
         force: 是否强制重新处理
+        translate_requested: 用户是否请求了翻译（调用边界显式传入）
+        translator_ready: 翻译器是否真的创建成功
+        translator_error_type: 翻译器创建失败的脱敏异常类别
 
     Returns:
         统计信息 dict
     """
+    if translate_requested is None:
+        translate_requested = translator_obj is not None
+    if translator_ready is None:
+        translator_ready = translator_obj is not None
     results = []
     skipped = 0
     failures = 0
@@ -107,6 +117,9 @@ def run_batch(
                 merge_gap_sec=merge_gap_sec,
                 paragraph_max_chars=paragraph_max_chars,
                 force=force,
+                translate_requested=translate_requested,
+                translator_ready=translator_ready,
+                translator_error_type=translator_error_type,
             )
             if result is not None:
                 results.append(result)

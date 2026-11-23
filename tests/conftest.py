@@ -9,6 +9,18 @@ from types import SimpleNamespace
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_default_delivery(monkeypatch, tmp_path):
+    """把默认交付的状态根映射到本用例的临时目录。
+
+    没有 ``RESEARCH_FEEDBACK_OUT`` 时，普通入口会写 owner 自有的持久收件
+    目录；测试期间把它指到临时状态根，避免写进本仓 ``output/.feedback``。
+    显式 OUT 的用例不受影响（OUT 优先于一切）。
+    """
+    monkeypatch.setenv("RESEARCH_FEEDBACK_STATE_ROOT", str(tmp_path / "state-root"))
+    monkeypatch.delenv("RESEARCH_FEEDBACK_DIR", raising=False)
+
+
 @pytest.fixture
 def tmp_output_dir(tmp_path):
     out = tmp_path / "output"

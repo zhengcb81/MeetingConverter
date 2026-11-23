@@ -24,6 +24,13 @@ import time
 from pathlib import Path
 
 from core.batch import get_audio_files, run_batch
+from core.feedback import (
+    STARTUP_ACCEPTED,
+    STARTUP_INITIALIZATION_FAILED,
+    STARTUP_LOCAL_IO_FAILED,
+    STARTUP_REQUEST_REJECTED,
+    begin_startup,
+)
 from core.formatter import fmt_ts
 from core.pipeline import merge_into_paragraphs, transcribe_one
 from core.output import write_original, write_translated, write_bilingual
@@ -49,6 +56,15 @@ FINANCIAL_PROMPT_MIXED = (
 
 
 def main():
+    """普通入口：身份先于参数解析建立；启动失败按阶段记录，退出码保持原口径。"""
+    startup = begin_startup()
+    try:
+        return _run(startup)
+    finally:
+        startup.finalize()
+
+
+def _run(startup) -> int:
     parser = argparse.ArgumentParser(
         description="MeetingConverter v2 - 音频转文字+翻译"
     )
@@ -80,7 +96,19 @@ def main():
     parser.add_argument(
         "--force", action="store_true", help="强制重新处理已完成的文件"
     )
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit as exc:
+        # 解析未完成：只记录能确定的身份与阶段。argparse 的原生退出码保留。
+        code = exc.code
+        if not isinstance(code, int):
+            code = 0 if code is None else 1
+        startup.record_outcome(
+            STARTUP_ACCEPTED if code == 0 else STARTUP_REQUEST_REJECTED,
+            stage="parsing",
+            exit_code=code,
+        )
+        raise
 
     # 配置 logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
@@ -90,27 +118,60 @@ def main():
         stream=sys.stdout,
     )
 
+    # 请求意图在初始边界保存：翻译是否被请求与翻译器是否可用是两件事。
+    translate_requested = not args.no_translate
+
     audio_files = get_audio_files(args.input)
     if not audio_files:
         logger.info("错误: 未找到音频文件")
-        sys.exit(1)
+        startup.record_outcome(
+            STARTUP_REQUEST_REJECTED,
+            stage="input",
+            exit_code=1,
+            translate_requested=translate_requested,
+        )
+        return 1
 
     output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.info(f"错误: 输出目录不可用: {exc}")
+        startup.record_outcome(
+            STARTUP_LOCAL_IO_FAILED,
+            stage="output_dir",
+            exit_code=1,
+            errors=[exc],
+            translate_requested=translate_requested,
+        )
+        return 1
 
     cfg = None
+    config_error = None
     try:
         cfg = load_config()
     except Exception as e:
+        config_error = e
         logger.info(f"配置加载失败 (使用默认): {e}")
 
     translator_obj = None
-    if not args.no_translate and cfg:
-        try:
-            translator_obj = Translator(cfg)
-            logger.info(f"翻译引擎: DeepSeek ({translator_obj.model})")
-        except Exception as e:
-            logger.info(f"翻译器不可用 (仅转写): {e}")
+    translator_error = None
+    if translate_requested:
+        if cfg is None:
+            # 请求了翻译但配置不可用：如实记录"翻译未运行"的原因。
+            translator_error = config_error
+            logger.info("翻译器不可用 (仅转写): 配置加载失败")
+        else:
+            try:
+                translator_obj = Translator(cfg)
+                logger.info(f"翻译引擎: DeepSeek ({translator_obj.model})")
+            except Exception as e:
+                translator_error = e
+                logger.info(f"翻译器不可用 (仅转写): {e}")
+    translator_ready = translator_obj is not None
+    translator_error_type = (
+        type(translator_error).__name__ if translator_error is not None else None
+    )
 
     whisper_model = (cfg or {}).get("whisper_model", args.model)
     whisper_device = (cfg or {}).get("whisper_device", args.device)
@@ -124,9 +185,23 @@ def main():
         language, FINANCIAL_PROMPT_MIXED
     )
 
-    engine = create_engine(
-        engine_choice, cfg, whisper_model, whisper_device, whisper_compute_type
-    )
+    try:
+        engine = create_engine(
+            engine_choice, cfg, whisper_model, whisper_device, whisper_compute_type
+        )
+    except Exception as exc:
+        logger.info(f"错误: 转写引擎初始化失败: {exc}")
+        startup.record_outcome(
+            STARTUP_INITIALIZATION_FAILED,
+            stage="engine_init",
+            exit_code=1,
+            errors=[exc],
+            translate_requested=translate_requested,
+            translator_ready=translator_ready if translate_requested else None,
+            translator_error_type=translator_error_type,
+            engine_choice=engine_choice,
+        )
+        return 1
     logger.info(f"\n转写引擎: {engine_choice}")
     logger.info("引擎就绪\n")
 
@@ -151,11 +226,25 @@ def main():
         merge_gap_sec=merge_gap,
         paragraph_max_chars=para_max,
         force=args.force,
+        translate_requested=translate_requested,
+        translator_ready=translator_ready,
+        translator_error_type=translator_error_type,
     )
 
-    if stats["failures"] > 0:
-        sys.exit(1)
+    exit_code = 1 if stats["failures"] > 0 else 0
+    startup.record_outcome(
+        STARTUP_ACCEPTED,
+        stage="batch",
+        exit_code=exit_code,
+        engine_started=True,
+        translation_attempted=translate_requested and translator_ready,
+        translate_requested=translate_requested,
+        translator_ready=translator_ready if translate_requested else None,
+        translator_error_type=translator_error_type,
+        engine_choice=engine_choice,
+    )
+    return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

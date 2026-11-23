@@ -158,3 +158,29 @@ def test_incompatible_terminal_cannot_confirm_the_original_job(run_case, field, 
     assert result["job_status"] == "unconfirmed"
     assert result["cost_state"] == "unknown"
     assert not db.exists()
+
+
+def test_degraded_publication_reconciles_as_a_delivered_job(tmp_path):
+    """成功回退（published_degraded）是已交付的作业；降级信号由 deviation 承载。"""
+    sidecar = tmp_path / "degraded.jsonl"
+    row = {
+        "schema_version": "feedback-observation/1", "owner": OWNER, "origin_owner": OWNER,
+        "run_id": "f4-run", "attempt_id": "attempt-1", "step_id": "meeting-operation/x/1",
+        "check_id": "publication-outcome", "expected": "published_current",
+        "actual": "published_degraded", "disposition": "deviation",
+        "evidence_ref": "mc-output/x", "version": "meeting-converter-feedback/1.1.0",
+    }
+    sidecar.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    occurrence = digest([row[name] for name in
+                         ("owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_id")])
+    lookup = request("reconcile", [occurrence], {"occurrence_id": occurrence, "observation": row})
+    outcome = subprocess.run(
+        [sys.executable, "-B", "-X", "utf8", str(CLI), "--db", str(tmp_path / "owner.sqlite"),
+         "--sidecar", str(sidecar), "reconcile"],
+        input=json.dumps(lookup).encode("ascii"), capture_output=True, timeout=15, check=True,
+    )
+    result = json.loads(outcome.stdout)
+    assert result["state"] == "done"
+    assert result["result"]["job_status"] == "succeeded"
+    assert result["result"]["cost_state"] == "unknown"
+    assert not (tmp_path / "owner.sqlite").exists(), "reconcile 全程只读"

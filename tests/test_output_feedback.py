@@ -231,7 +231,13 @@ class TestObservationShape:
         assert "Xiaomi" not in blob
         assert "写盘失败" not in blob
         finished = next(row for row in read_rows(details) if row["phase"] == "finished")
-        assert finished["errors"] == [{"stage": "output", "role": "bilingual", "error_type": "OSError"}]
+        assert finished["errors"] == [{
+            "stage": "output",
+            "role": "bilingual",
+            "error_type": "OSError",
+            "cause_types": [],
+            "location": "core/pipeline.py#transcribe_one",
+        }]
 
 
 # ── 正例 ─────────────────────────────────────────────────────────
@@ -658,6 +664,32 @@ class TestSidecarIsOptional:
         messages = [r.getMessage() for r in caplog.records]
         assert any("反馈旁路" in m for m in messages), messages
 
+    def test_delivery_publish_failure_keeps_the_business_outcome(
+        self, engine, translator, audio_file, tmp_output_dir, tmp_path, monkeypatch
+    ):
+        """默认交付发布失败：返回值、产物与调用次数与可写时一致。"""
+        from core import feedback
+
+        monkeypatch.delenv("RESEARCH_FEEDBACK_OUT", raising=False)
+        monkeypatch.setenv("RESEARCH_FEEDBACK_STATE_ROOT", str(tmp_path / "blocked-state"))
+
+        def refuse_publish(self, path, lines):
+            return False
+
+        monkeypatch.setattr(feedback.DeliveringRecorder, "_publish", refuse_publish)
+        result = transcribe_one(
+            engine, audio_file, tmp_output_dir, translator_obj=translator
+        )
+        assert result is not None
+        assert sorted(p.name for p in tmp_output_dir.iterdir()) == [
+            "meeting_中英对照.txt",
+            "meeting_原文.txt",
+            "meeting_翻译.txt",
+        ]
+        assert engine.transcribe.call_count == 1
+        assert translator.translate_paragraphs.call_count == 1
+        assert not (tmp_path / "blocked-state").exists()
+
     def test_malformed_sidecar_path_does_not_break_the_run(
         self, engine, audio_file, tmp_output_dir, monkeypatch
     ):
@@ -978,7 +1010,13 @@ class TestPublicEntryIntegration:
         details = sidecar.with_name(sidecar.name + ".details.jsonl")
         assert secret_marker not in details.read_text(encoding="utf-8")
         finished = next(row for row in read_rows(details) if row["phase"] == "finished")
-        assert finished["errors"] == [{"stage": "transcription", "role": None, "error_type": "RuntimeError"}]
+        assert finished["errors"] == [{
+            "stage": "transcription",
+            "role": None,
+            "error_type": "RuntimeError",
+            "cause_types": [],
+            "location": "core/pipeline.py#transcribe_one",
+        }]
 
     def test_truncated_sidecar_tail_cannot_consume_the_next_start(
         self, engine, audio_file, tmp_output_dir, sidecar
@@ -1016,7 +1054,7 @@ class TestPublicEntryIntegration:
 
     @pytest.mark.parametrize("enabled", [False, True])
     def test_optional_probe_error_cannot_turn_reuse_into_business_failure(
-        self, enabled, engine, audio_file, tmp_output_dir, sidecar, monkeypatch
+        self, enabled, engine, audio_file, tmp_output_dir, tmp_path, sidecar, monkeypatch
     ):
         write_old_outputs(tmp_output_dir)
         if not enabled:
@@ -1040,7 +1078,15 @@ class TestPublicEntryIntegration:
             assert finished["reused_outputs"]["translated"] is None
             assert row_for(read_rows(sidecar), "publication-outcome")["actual"] == "reused_existing"
         else:
-            assert not probes
+            # 没有显式 OUT 时走默认交付：可选探针照样只读旧件 presence，
+            # 探针失败不改变业务结果，观察落在交付文件里。
+            assert len(probes) == 1
+            deliveries = sorted(
+                (tmp_path / "state-root" / "observations").glob("feedback-*.jsonl")
+            )
+            assert deliveries
+            rows = read_rows(deliveries[0])
+            assert row_for(rows, "publication-outcome")["actual"] == "reused_existing"
             assert not sidecar.exists()
 
     def test_disabled_observation_never_reopens_committed_output(

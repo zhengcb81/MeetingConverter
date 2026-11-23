@@ -16,27 +16,48 @@ CLI 的 stdout 上，业务日志行本身不变。
     ``reused_existing``。actual 取本轮真正提交的结果：``original_current`` /
     ``original_translated_bilingual_current`` / ``previous_translations_only`` /
     ``stale_and_missing_translations`` / ``missing_translations`` /
-    ``partial_current`` / ``reused_existing`` / ``write_failed`` /
-    ``transcription_failed`` / ``translation_failed`` / ``unknown``。
+    ``translation_unavailable`` / ``partial_current`` / ``reused_existing`` /
+    ``write_failed`` / ``transcription_failed`` / ``translation_failed`` /
+    ``unknown``。
     “本轮产出但只提交了部分目标”“只保留上一版译文”“一次成功的原文模式”
-    是三件不同的事，因此有三个不同的 actual。
+    是三件不同的事，因此有三个不同的 actual；``translation_unavailable`` 是
+    “翻译被请求但翻译器没能创建、翻译从未运行”——它和“翻译运行了但失败”
+    也分开。
 
 ``writer-<role>``
     role 取 ``original`` / ``translated`` / ``bilingual``。actual 取
-    ``committed_this_round`` / ``not_requested`` / ``previous_kept`` /
-    ``absent`` / ``failed``。
+    ``committed_this_round`` / ``not_requested`` / ``not_run`` /
+    ``previous_kept`` / ``absent`` / ``failed``。
+    ``not_requested`` 是调用方主动不要这个角色；``not_run`` 是角色被请求了、
+    但上游阶段（翻译器未能创建）根本没运行。
 
 ``transcription-started``
     actual 取 ``engine_started`` / ``engine_not_started``，用来证明引擎是否
     真的被调用过。
 
+``engine-fallback``
+    只在主引擎失败、备用引擎被启用（或启用失败）时出现。expected 恒为
+    ``primary_only``（请求名义上由主引擎完成），actual 取
+    ``fallback_engaged`` / ``fallback_unavailable``。一次成功回退因此同时
+    是“产物符合请求”与“业务降级”两件事：``requested-outputs`` 照实报
+    产物结果，终态报 ``published_degraded``。
+
 ``publication-outcome``
     终态：``published_current`` / ``published_partial`` /
-    ``published_incomplete`` / ``reused_existing`` / ``write_failed`` /
-    ``transcription_failed`` / ``translation_failed`` / ``unknown``。
+    ``published_incomplete`` / ``published_degraded`` / ``reused_existing`` /
+    ``write_failed`` / ``transcription_failed`` / ``translation_failed`` /
+    ``unknown``。
     ``published_partial`` 是“提交了部分目标，另一个 writer 失败”，
     ``published_incomplete`` 是“本轮没产出译文，只剩上一版或根本没有”——两件
-    不同的事，因此在终态上也分开。
+    不同的事，因此在终态上也分开。``published_degraded`` 是“请求的产物都在，
+    但走了降级路径（备用引擎顶替主引擎）”——成功与降级同时成立。
+
+``run-started`` / ``startup-outcome``
+    普通 CLI 启动边界的收据，step 前缀 ``mc-startup/``，先于参数解析落盘。
+    ``startup-outcome`` 的 actual 取 ``accepted`` / ``request_rejected`` /
+    ``initialization_failed`` / ``local_io_failed``，details 里给出阶段
+    （parsing/input/output_dir/engine_init/batch）、退出码、脱敏异常链与
+    确知的未调用事实（engine_started/translation_attempted）。
 
 ``cost-receipt``
     本仓没有用量收据，因此费用恒为 ``cost_unknown``，disposition 为
@@ -58,10 +79,11 @@ import json
 import logging
 import os
 import stat
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.output import WrittenOutput
 
@@ -69,10 +91,13 @@ logger = logging.getLogger(__name__)
 
 OBSERVATION_SCHEMA = "feedback-observation/1"
 DETAIL_SCHEMA = "meeting-converter-feedback-detail/1"
+DELIVERY_SCHEMA = "feedback-delivery-ready/1"
 OWNER = "meeting-converter"
-ADAPTER_VERSION = "meeting-converter-feedback/1.0.3"
+ADAPTER_VERSION = "meeting-converter-feedback/1.1.0"
 
 FEEDBACK_OUT_ENV = "RESEARCH_FEEDBACK_OUT"
+FEEDBACK_DIR_ENV = "RESEARCH_FEEDBACK_DIR"
+FEEDBACK_STATE_ROOT_ENV = "RESEARCH_FEEDBACK_STATE_ROOT"
 FEEDBACK_RUN_ID_ENV = "RESEARCH_FEEDBACK_RUN_ID"
 FEEDBACK_ATTEMPT_ID_ENV = "RESEARCH_FEEDBACK_ATTEMPT_ID"
 
@@ -82,10 +107,13 @@ DISPOSITIONS = ("expected", "deviation", "unknown")
 
 CHECK_ACTION_STARTED = "action-started"
 CHECK_TRANSCRIPTION_STARTED = "transcription-started"
+CHECK_ENGINE_FALLBACK = "engine-fallback"
 CHECK_WRITER_PREFIX = "writer-"
 CHECK_REQUESTED_OUTPUTS = "requested-outputs"
 CHECK_PUBLICATION_OUTCOME = "publication-outcome"
 CHECK_COST_RECEIPT = "cost-receipt"
+CHECK_RUN_STARTED = "run-started"
+CHECK_STARTUP_OUTCOME = "startup-outcome"
 TERMINAL_CHECK_ID = CHECK_PUBLICATION_OUTCOME
 
 # ── writer 角色 ──────────────────────────────────────────────────
@@ -109,6 +137,7 @@ EXPECTED_REUSED = "reused_existing"
 ACTUAL_PREVIOUS_TRANSLATIONS = "previous_translations_only"
 ACTUAL_STALE_AND_MISSING = "stale_and_missing_translations"
 ACTUAL_MISSING_TRANSLATIONS = "missing_translations"
+ACTUAL_TRANSLATION_UNAVAILABLE = "translation_unavailable"
 ACTUAL_PARTIAL = "partial_current"
 ACTUAL_WRITE_FAILED = "write_failed"
 ACTUAL_TRANSCRIPTION_FAILED = "transcription_failed"
@@ -118,9 +147,11 @@ ACTUAL_UNKNOWN = "unknown"
 PUBLISHED_CURRENT = "published_current"
 PUBLISHED_PARTIAL = "published_partial"
 PUBLISHED_INCOMPLETE = "published_incomplete"
+PUBLISHED_DEGRADED = "published_degraded"
 
 WRITER_COMMITTED = "committed_this_round"
 WRITER_NOT_REQUESTED = "not_requested"
+WRITER_NOT_RUN = "not_run"
 WRITER_PREVIOUS_KEPT = "previous_kept"
 WRITER_ABSENT = "absent"
 WRITER_FAILED = "failed"
@@ -131,11 +162,32 @@ ENGINE_NOT_STARTED = "engine_not_started"
 
 COST_UNKNOWN = "cost_unknown"
 
+USAGE_UNKNOWN_BASIS = "no_usage_receipt"
+
 # ── 阶段 ─────────────────────────────────────────────────────────
 
 STAGE_TRANSCRIPTION = "transcription"
 STAGE_TRANSLATION = "translation"
 STAGE_OUTPUT = "output"
+STAGE_PARSING = "parsing"
+STAGE_INPUT = "input"
+STAGE_OUTPUT_DIR = "output_dir"
+STAGE_ENGINE_INIT = "engine_init"
+STAGE_BATCH = "batch"
+
+PIPELINE_ERROR_LOCATION = "core/pipeline.py#transcribe_one"
+CLI_ERROR_LOCATION = "transcribe.py#main"
+
+# ── 启动终态与回退 ───────────────────────────────────────────────
+
+STARTUP_ACCEPTED = "accepted"
+STARTUP_REQUEST_REJECTED = "request_rejected"
+STARTUP_INITIALIZATION_FAILED = "initialization_failed"
+STARTUP_LOCAL_IO_FAILED = "local_io_failed"
+
+FALLBACK_EXPECTED = "primary_only"
+FALLBACK_ENGAGED = "fallback_engaged"
+FALLBACK_UNAVAILABLE = "fallback_unavailable"
 
 # ── issue_key（本仓认可的规则签名）────────────────────────────────
 
@@ -197,9 +249,20 @@ def _details_identity(record: Mapping[str, Any]) -> str:
     return "fb-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def feedback_io_path(path: Path) -> Path:
+    """Translate a physical feedback path without changing its logical identity."""
+    if os.name != "nt":
+        return path
+    absolute = os.path.abspath(path)
+    if absolute.startswith(("\\\\?\\", "\\\\.\\")):
+        return Path(absolute)
+    return Path("\\\\?\\UNC\\" + absolute[2:] if absolute.startswith("\\\\") else "\\\\?\\" + absolute)
+
+
 def _read_jsonl(path: Path) -> List[dict]:
     """读取一个 JSONL 文件；读不到或不是 JSON 行时不给记录。"""
     try:
+        path = feedback_io_path(path)
         if not path.is_file():
             return []
         raw = path.read_bytes()
@@ -217,6 +280,37 @@ def _read_jsonl(path: Path) -> List[dict]:
         if isinstance(record, dict):
             records.append(record)
     return records
+
+
+def _exception_cause_chain(error: BaseException) -> List[str]:
+    """脱敏的因果链：只取异常类别名，不含任何消息正文。
+
+    外层异常的类别由 ``error_type`` 承担，这里只返回它的底层原因（``__cause__``
+    优先，未抑制时 ``__context__`` 兜底），因此 TimeoutError 与另一个内因可以
+    冷读分辨。
+    """
+    chain: List[str] = []
+    seen: set = set()
+    current: Optional[BaseException] = error
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        name = type(current).__name__
+        if name not in chain:
+            chain.append(name)
+        following = current.__cause__
+        if following is None and not current.__suppress_context__:
+            following = current.__context__
+        current = following
+    return chain[1:]
+
+
+def _redacted_error(error: BaseException, location: str) -> Dict[str, Any]:
+    """一条脱敏异常记录：类别、脱敏因果链与本仓相对代码位置。"""
+    return {
+        "error_type": type(error).__name__,
+        "cause_types": _exception_cause_chain(error),
+        "location": location,
+    }
 
 
 class FeedbackRecorder:
@@ -394,6 +488,7 @@ class FeedbackRecorder:
                 return False
             return True
         try:
+            path = feedback_io_path(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a+b") as handle:
                 # Keep a truncated old record on a separate line from the next append.
@@ -433,22 +528,207 @@ _LAST_RECORDER: Optional[FeedbackRecorder] = None
 _PROCESS_RUN_ID = "run-" + uuid.uuid4().hex[:12]
 
 
+def default_state_root() -> Path:
+    """owner 自有的持久状态根：本仓 ``output/.feedback``。"""
+    return Path(__file__).resolve().parents[1] / "output" / ".feedback"
+
+
+def _state_root(environ: Mapping[str, str]) -> Path:
+    value = environ.get(FEEDBACK_STATE_ROOT_ENV)
+    return Path(value.strip()) if isinstance(value, str) and value.strip() else default_state_root()
+
+
+def resolve_delivery_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
+    """默认交付的公开收件目录。
+
+    ``RESEARCH_FEEDBACK_DIR`` 直接指定隔离的公开收件目录；否则用
+    ``RESEARCH_FEEDBACK_STATE_ROOT`` 指定的状态根（隔离测试把本机状态根映射
+    到临时目录）下的 ``observations``；两者都没有时用本机默认状态根。
+    """
+    env = os.environ if environ is None else environ
+    raw_dir = env.get(FEEDBACK_DIR_ENV)
+    if isinstance(raw_dir, str) and raw_dir.strip():
+        return Path(raw_dir.strip())
+    return _state_root(env) / "observations"
+
+
+class DeliveringRecorder(FeedbackRecorder):
+    """默认交付模式：owner 持久状态根下的原子发布文件与 ``.ready`` 标记。
+
+    每次落行都用同目录临时文件整体重写发布 ``feedback-<32 位小写 UUID
+    hex>.jsonl`` 与同名 ``*.details.jsonl``；进程终局先补一次完整发布，再原子
+    写同 basename 的 ``.ready`` 标记。读方因此不会读到半个文件：数据已落而
+    ready 未发 = 上一个进程没有走完终局（未确认区间），行仍然可读、可对账。
+    每个进程一个独立文件名，两个并发任务天然隔离。
+    """
+
+    def __init__(
+        self,
+        delivery_dir: Any,
+        *,
+        run_id: str,
+        attempt_id: str,
+        delivery_id: Optional[str] = None,
+        owner: str = OWNER,
+        recovery_dir: Optional[Path] = None,
+    ) -> None:
+        self.delivery_id = delivery_id or uuid.uuid4().hex
+        out_path = Path(delivery_dir) / f"feedback-{self.delivery_id}.jsonl"
+        super().__init__(out_path, run_id=run_id, attempt_id=attempt_id, owner=owner)
+        self._published: Dict[Path, List[str]] = {}
+        self._recovery_dir = recovery_dir if recovery_dir != self.out_path.parent else None
+        self._recovering = False
+        self._finalized = False
+        # 重开同一交付身份（补发/恢复）时，先用盘上既有内容播种：整体重写
+        # 发布必须保留历史行，而不是把文件清空后只写新行。
+        for target in (self.out_path, self.details_path):
+            try:
+                raw = feedback_io_path(target).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            self._published[target] = [
+                line + "\n" for line in raw.splitlines() if line.strip()
+            ]
+
+    def _destination(self, path: Path) -> Path:
+        if self._recovering and self._recovery_dir is not None:
+            return self._recovery_dir / path.name
+        return path
+
+    def _save(self, path: Path, lines: List[str]) -> bool:
+        if self._publish(self._destination(path), lines):
+            return True
+        if self._recovering or self._recovery_dir is None:
+            return False
+        # Keep the original delivery identity. Both directories remain readable for
+        # a consumer that has already observed a start in the primary directory.
+        self._recovering = True
+        saved = {
+            target: self._publish(self._destination(target), content)
+            for target, content in self._published.items()
+        }
+        if path in saved:
+            return saved[path]
+        return all(saved.values()) and self._publish(self._destination(path), lines)
+
+    def _append_jsonl(self, path: Path, record: Mapping[str, Any], *, sink=None) -> bool:
+        if sink is not None:
+            return super()._append_jsonl(path, record, sink=sink)
+        line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        lines = self._published.setdefault(path, [])
+        # 同一行因上一次发布失败而被保留时，重投不重复追加。
+        if line not in lines:
+            lines.append(line)
+        if self._save(path, lines):
+            return True
+        # 发布失败（如并发读者让替换瞬时失败）：内容保留在内存里，等下一次
+        # 发布或终局补投带走；诊断已由 _publish 记下，本行不算送达。
+        return False
+
+    def _publish(self, path: Path, lines: List[str]) -> bool:
+        """同目录临时文件、关闭写入、原子替换。
+
+        Windows 上并发读者持有的句柄可能让 ``os.replace`` 瞬时失败：少量
+        退避重试通常足以穿过；仍失败则返回 False，由调用方保留内容重试。
+        """
+        tmp: Optional[Path] = None
+        try:
+            path = feedback_io_path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+            with tmp.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write("".join(lines))
+                handle.flush()
+                os.fsync(handle.fileno())
+            for attempt in range(4):
+                try:
+                    tmp.replace(path)
+                    tmp = None
+                    return True
+                except OSError:
+                    if attempt == 3:
+                        raise
+                    time.sleep(0.01)
+            return False
+        except OSError as exc:
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            return False
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
+    def finalize_delivery(self) -> bool:
+        """进程终局：有界补投观察与明细，两者都落盘后才原子写 ``.ready``。
+
+        观察文件是交付的主体，明细按卡面语义先于 ready 就绪；任何一个补投
+        预算耗尽就不写 ready。收件目录不可写时，同一投递转入 owner 恢复目录。
+        标记绑定两份已经落盘的内容。
+        """
+        if self._finalized:
+            return True
+        published = self._drain(self.out_path)
+        if self._published.get(self.details_path):
+            published = self._drain(self.details_path) and published
+        if not published:
+            return False
+        observations = self._published[self.out_path]
+        details = self._published.get(self.details_path, [])
+        steps = sorted({json.loads(line)["step_id"] for line in observations})
+        marker = {
+            "schema_version": DELIVERY_SCHEMA,
+            "owner": self.owner,
+            "run_id": self.run_id,
+            "attempt_id": self.attempt_id,
+            "step_ids": steps,
+            "observations": len(observations),
+            "details": len(details),
+            "observations_sha256": hashlib.sha256("".join(observations).encode("utf-8")).hexdigest(),
+        }
+        if details:
+            marker["details_sha256"] = hashlib.sha256("".join(details).encode("utf-8")).hexdigest()
+        ready_path = self.out_path.with_name(self.out_path.stem + ".ready")
+        line = json.dumps(marker, ensure_ascii=False, separators=(",", ":")) + "\n"
+        if marker in _read_jsonl(self._destination(ready_path).with_suffix(".ack")):
+            self._finalized = True
+        else:
+            self._finalized = self._save(ready_path, [line])
+        return self._finalized
+
+    def _drain(self, path: Path) -> bool:
+        """终局补投：有界循环直到发布成功或预算耗尽。
+
+        预算 ≈ 20×(4×10ms 重试 + 50ms 间隔)：并发读者短促持句柄时几乎必然
+        穿过；持续压力下耗尽预算则如实返回 False。
+        """
+        lines = self._published.get(path)
+        if not lines:
+            # 观察文件没有内容就不是一次交付；明细可以为空。
+            return path is not self.out_path
+        for _ in range(20):
+            if self._save(path, lines):
+                return True
+            time.sleep(0.05)
+        return False
+
+
 def recorder_from_env(
     environ: Optional[Mapping[str, str]] = None,
 ) -> Optional[FeedbackRecorder]:
-    """本进程的 recorder；没有指定旁路目的地时返回 None。
+    """本进程的 recorder。
 
-    目的地由宿主通过 ``RESEARCH_FEEDBACK_OUT`` 指定；运行与尝试身份可以由
-    宿主通过 ``RESEARCH_FEEDBACK_RUN_ID`` / ``RESEARCH_FEEDBACK_ATTEMPT_ID``
-    提供。目的地不合法时返回 None：旁路永远不能让主任务失败。
+    宿主通过 ``RESEARCH_FEEDBACK_OUT`` 指定单次旁路文件时沿用既有单次文件
+    模式（OUT 优先于一切）；否则默认交付到 owner 自有的持久收件目录
+    （``RESEARCH_FEEDBACK_DIR`` 指定隔离收件目录，或状态根下的
+    ``observations``）。运行与尝试身份可以由宿主通过
+    ``RESEARCH_FEEDBACK_RUN_ID`` / ``RESEARCH_FEEDBACK_ATTEMPT_ID`` 提供。
+    目的地不合法时返回 None：旁路永远不能让主任务失败。
     """
     global _LAST_RECORDER
 
     env = os.environ if environ is None else environ
-    raw = env.get(FEEDBACK_OUT_ENV)
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    out = raw.strip()
     run_id = env.get(FEEDBACK_RUN_ID_ENV)
     if not _is_str(run_id):
         run_id = _PROCESS_RUN_ID
@@ -456,14 +736,37 @@ def recorder_from_env(
     if not _is_str(attempt_id):
         attempt_id = "attempt-1"
 
-    key = (out, run_id, attempt_id)
+    raw = env.get(FEEDBACK_OUT_ENV)
+    if isinstance(raw, str) and raw.strip():
+        out = raw.strip()
+        key = (out, run_id, attempt_id)
+        recorder = _RECORDERS.get(key)
+        if recorder is None:
+            try:
+                recorder = FeedbackRecorder(out, run_id=run_id, attempt_id=attempt_id)
+            except Exception as exc:
+                # 目的地不合法（例如没有文件名的盘符）：旁路不可用，但主任务照常。
+                logger.warning(f"反馈旁路目的地不可用（不影响本次转录结果）: {type(exc).__name__}")
+                return None
+            _RECORDERS[key] = recorder
+        _LAST_RECORDER = recorder
+        return recorder
+
+    try:
+        delivery_dir = resolve_delivery_dir(env)
+    except Exception as exc:
+        logger.warning(f"反馈交付目录不可用（不影响本次转录结果）: {type(exc).__name__}")
+        return None
+    key = ("delivery:" + str(delivery_dir), run_id, attempt_id)
     recorder = _RECORDERS.get(key)
     if recorder is None:
         try:
-            recorder = FeedbackRecorder(out, run_id=run_id, attempt_id=attempt_id)
+            recorder = DeliveringRecorder(
+                delivery_dir, run_id=run_id, attempt_id=attempt_id,
+                recovery_dir=_state_root(env) / "recovery",
+            )
         except Exception as exc:
-            # 目的地不合法（例如没有文件名的盘符）：旁路不可用，但主任务照常。
-            logger.warning(f"反馈旁路目的地不可用（不影响本次转录结果）: {type(exc).__name__}")
+            logger.warning(f"反馈交付目录不可用（不影响本次转录结果）: {type(exc).__name__}")
             return None
         _RECORDERS[key] = recorder
     _LAST_RECORDER = recorder
@@ -503,12 +806,19 @@ class OperationFeedback:
         input_id: str,
         requested_mode: str,
         force: bool,
+        translator_ready: bool = True,
+        translator_error_type: Optional[str] = None,
     ) -> None:
         self._recorder = recorder
         self.input_id = input_id
         self.step_id = f"meeting-operation/{input_id}/{uuid.uuid4().hex}" if recorder else ""
         self.requested_mode = requested_mode
         self.force = bool(force)
+        # 翻译意图由调用边界显式传入：不从翻译器对象缺席推导用户主动关闭。
+        self._translator_unavailable = (
+            requested_mode == MODE_TRANSLATED and not translator_ready
+        )
+        self._translator_error_type = translator_error_type
         self._writers: Dict[str, Dict[str, Any]] = {}
         self._writer_paths: Dict[str, Path] = {}
         self._errors: List[Dict[str, Any]] = []
@@ -520,6 +830,12 @@ class OperationFeedback:
         self._finished = False
         self._pending: List[Dict[str, Any]] = []
         self._started_details: Optional[Dict[str, Any]] = None
+        # 引擎回退事实（来自 FallbackEngine 的事件流）。
+        self._fallback_engaged = False
+        self._fallback_engine: Optional[str] = None
+        self._primary_error: Optional[Dict[str, Any]] = None
+        self._fallback_unavailable = False
+        self._fallback_unavailable_error: Optional[Dict[str, Any]] = None
 
     # ── 事实 ──────────────────────────────────────────────────────
 
@@ -536,6 +852,40 @@ class OperationFeedback:
         """本轮没有调用引擎（命中已有原件的跳过规则）。"""
         self._engine_started = False
         self._emit_transcription_started(ENGINE_NOT_STARTED)
+
+    def note_engine_events(self, events: List[Mapping[str, Any]]) -> None:
+        """接收引擎包装层（如 FallbackEngine）的降级事件。
+
+        只接受结构化事实：主失败是否发生、备用引擎是否真的顶上、备用的
+        类别名。异常正文留在本仓日志里，不进入投影。
+        """
+        for event in events or []:
+            if not isinstance(event, Mapping):
+                continue
+            kind = event.get("event")
+            if kind == "primary_failed":
+                self._primary_error = {
+                    "error_type": event.get("error_type"),
+                    "cause_types": [
+                        str(name) for name in (event.get("cause_types") or [])
+                    ],
+                }
+            elif kind == "fallback_engaged":
+                self._fallback_engaged = True
+                engine = event.get("engine")
+                self._fallback_engine = str(engine) if engine else None
+            elif kind == "fallback_unavailable":
+                self._fallback_unavailable = True
+                self._fallback_unavailable_error = {
+                    "error_type": event.get("error_type"),
+                    "cause_types": [
+                        str(name) for name in (event.get("cause_types") or [])
+                    ],
+                }
+
+    def note_writer_not_run(self, role: str) -> None:
+        """角色被请求了，但上游阶段（翻译器未能创建）根本没运行。"""
+        self._note_writer(role, WRITER_NOT_RUN)
 
     @property
     def enabled(self) -> bool:
@@ -590,21 +940,36 @@ class OperationFeedback:
         """本轮被中止，没有可信终态：终态保留 unknown。"""
         self._unknown = True
 
-    def note_error(self, error: BaseException) -> None:
+    def note_error(self, error: BaseException, location: Optional[str] = None) -> None:
         """记录本轮的一个原始异常（本仓自己保留细节）。"""
-        self._note_error(None, error)
+        self._note_error(None, error, location)
 
-    def _note_error(self, role: Optional[str], error: BaseException) -> None:
+    def _note_error(
+        self,
+        role: Optional[str],
+        error: BaseException,
+        location: Optional[str] = None,
+    ) -> None:
         if self._recorder is None:
             return
         error_type = type(error).__name__
+        cause_types = _exception_cause_chain(error)
         if any(
             item["stage"] == self._stage and item["error_type"] == error_type
             and (role is None or item["role"] == role)
+            and item.get("cause_types") == cause_types
             for item in self._errors
         ):
             return
-        self._errors.append({"stage": self._stage, "role": role, "error_type": error_type})
+        self._errors.append(
+            {
+                "stage": self._stage,
+                "role": role,
+                "error_type": error_type,
+                "cause_types": cause_types,
+                "location": location or PIPELINE_ERROR_LOCATION,
+            }
+        )
 
     # ── 观察 ──────────────────────────────────────────────────────
 
@@ -639,6 +1004,7 @@ class OperationFeedback:
         self._probe_writer_outputs()
         details = self._details_payload("finished", metrics=metrics)
         self._emit_writer_rows(details)
+        self._emit_engine_fallback_row(details)
 
         requested_expected = self._requested_expected()
         requested_actual = self._requested_actual()
@@ -763,6 +1129,25 @@ class OperationFeedback:
                 }
             )
 
+    def _emit_engine_fallback_row(self, details: Mapping[str, Any]) -> None:
+        """主引擎失败、备用引擎被启用（或启用失败）时记录降级事实。"""
+        if self._recorder is None:
+            return
+        if not (self._primary_error or self._fallback_engaged or self._fallback_unavailable):
+            return
+        actual = FALLBACK_UNAVAILABLE if self._fallback_unavailable else FALLBACK_ENGAGED
+        self._pending.append(
+            {
+                "step_id": self.step_id,
+                "check_id": CHECK_ENGINE_FALLBACK,
+                "expected": FALLBACK_EXPECTED,
+                "actual": actual,
+                "disposition": "deviation",
+                "evidence_ref": evidence_ref_for(self.input_id),
+                "details": details,
+            }
+        )
+
     def _issue_key(self, requested_actual: str) -> Optional[str]:
         """根因已确认时才带 issue_key。
 
@@ -802,6 +1187,9 @@ class OperationFeedback:
             return ACTUAL_WRITE_FAILED
         if self.requested_mode == MODE_ORIGINAL_ONLY:
             return EXPECTED_ORIGINAL_CURRENT
+        if self._translator_unavailable:
+            # 翻译被请求但翻译器没能创建：与“翻译运行了但失败”分开。
+            return ACTUAL_TRANSLATION_UNAVAILABLE
         translated = self._writers.get(ROLE_TRANSLATED, {}).get("result")
         bilingual = self._writers.get(ROLE_BILINGUAL, {}).get("result")
         if translated == WRITER_COMMITTED and bilingual == WRITER_COMMITTED:
@@ -842,6 +1230,9 @@ class OperationFeedback:
         ):
             return requested
         if requested == self._requested_expected():
+            if self._fallback_engaged:
+                # 产物与请求一致，但走的是降级路径：成功与降级同时成立。
+                return PUBLISHED_DEGRADED
             return PUBLISHED_CURRENT
         if requested == ACTUAL_PARTIAL:
             # 提交了部分目标，另一个 writer 失败。
@@ -881,6 +1272,22 @@ class OperationFeedback:
             payload["errors"] = list(self._errors)
             payload["metrics"] = dict(metrics or {})
             payload["outcome"] = self._publication_actual()
+            payload["engine"] = {
+                "fallback_engaged": self._fallback_engaged,
+                "fallback_engine": self._fallback_engine,
+                "primary_error": self._primary_error,
+                "fallback_unavailable": self._fallback_unavailable,
+                "fallback_unavailable_error": self._fallback_unavailable_error,
+            }
+            payload["translation"] = {
+                "requested": self.requested_mode == MODE_TRANSLATED,
+                "ran": self.requested_mode == MODE_TRANSLATED
+                and not self._translator_unavailable,
+                "unavailable": self._translator_unavailable,
+                "unavailable_error_type": self._translator_error_type,
+            }
+            # 本仓没有用量收据：费用与用量保持未知，写明依据。
+            payload["usage"] = {"known": False, "basis": USAGE_UNKNOWN_BASIS}
             if self._reused is not None:
                 payload["reused_outputs"] = dict(self._reused)
         return payload
@@ -913,12 +1320,15 @@ def begin_operation(
     audio_path: Any,
     translate_requested: bool,
     force: bool,
+    translator_ready: bool = True,
+    translator_error_type: Optional[str] = None,
     environ: Optional[Mapping[str, str]] = None,
 ) -> OperationFeedback:
     """开始一次转录操作的反馈投影。
 
     没有启用旁路时返回一个空操作对象：调用方不需要为它写任何分支。
     旁路目的地不合法时同样返回空操作对象——旁路永远不能让主任务失败。
+    翻译意图（请求与否、翻译器是否真的可用）由调用边界显式传入。
     """
     try:
         recorder = recorder_from_env(environ)
@@ -937,4 +1347,132 @@ def begin_operation(
         input_id=input_id,
         requested_mode=mode,
         force=force,
+        translator_ready=translator_ready,
+        translator_error_type=translator_error_type,
     )
+
+
+# ── 普通 CLI 启动边界 ────────────────────────────────────────────
+
+
+class StartupFeedback:
+    """普通启动的收据：身份先于参数解析与一切副作用建立。
+
+    ``run-started`` 行在构造时立即落盘：进程强停之后，新进程仍能读回这次
+    尝试与它的未确认区间。启动终态区分请求拒绝、初始化失败与本地 I/O 失败；
+    解析未完成时只记录能确定的身份与阶段。旁路不可用时全部为空操作。
+    """
+
+    def __init__(self, recorder: Optional[FeedbackRecorder]) -> None:
+        self._recorder = recorder
+        self._finished = False
+        if recorder is None:
+            self._step_id = ""
+            self._evidence_ref = ""
+            return
+        hex_part = uuid.uuid4().hex[:12]
+        self._step_id = f"mc-startup/{hex_part}"
+        self._evidence_ref = f"mc-startup/{hex_part}"
+        recorder.record(
+            step_id=self._step_id,
+            check_id=CHECK_RUN_STARTED,
+            expected="started",
+            actual="started",
+            disposition="expected",
+            evidence_ref=self._evidence_ref,
+            terminal_check_id=CHECK_STARTUP_OUTCOME,
+            details={
+                "schema_version": DETAIL_SCHEMA,
+                "phase": "started",
+                "step_id": self._step_id,
+                "projection_version": ADAPTER_VERSION,
+                "recorded_at": now(),
+            },
+        )
+
+    @property
+    def step_id(self) -> str:
+        return self._step_id
+
+    @property
+    def enabled(self) -> bool:
+        return self._recorder is not None
+
+    def record_outcome(
+        self,
+        actual: str,
+        *,
+        stage: str,
+        exit_code: int,
+        errors: Sequence[BaseException] = (),
+        engine_started: bool = False,
+        translation_attempted: bool = False,
+        translate_requested: Optional[bool] = None,
+        translator_ready: Optional[bool] = None,
+        translator_error_type: Optional[str] = None,
+        engine_choice: Optional[str] = None,
+    ) -> None:
+        """记录启动终态（解析拒绝/初始化失败/本地 I/O 失败/受理）。
+
+        确知未调用的边界写 ``invocations`` 的未发送事实；异常只保留脱敏的
+        类别链与本仓相对代码位置。
+        """
+        if self._recorder is None or self._finished:
+            return
+        self._finished = True
+        details: Dict[str, Any] = {
+            "schema_version": DETAIL_SCHEMA,
+            "phase": "startup",
+            "step_id": self._step_id,
+            "stage": stage,
+            "exit_code": exit_code,
+            "errors": [_redacted_error(error, CLI_ERROR_LOCATION) for error in errors],
+            "invocations": {
+                "engine_started": engine_started,
+                "translation_attempted": translation_attempted,
+            },
+            "usage": {"known": False, "basis": USAGE_UNKNOWN_BASIS},
+            "projection_version": ADAPTER_VERSION,
+            "recorded_at": now(),
+        }
+        if translate_requested is not None:
+            details["translate_requested"] = bool(translate_requested)
+        if translator_ready is not None:
+            details["translator_ready"] = bool(translator_ready)
+        if translator_error_type:
+            details["translator_error_type"] = translator_error_type
+        if engine_choice:
+            details["engine"] = engine_choice
+        self._recorder.record(
+            step_id=self._step_id,
+            check_id=CHECK_STARTUP_OUTCOME,
+            expected=STARTUP_ACCEPTED,
+            actual=actual,
+            evidence_ref=self._evidence_ref,
+            details=details,
+        )
+
+    def finalize(self) -> None:
+        """进程终局：交付模式补一次发布并写 ``.ready``；失败不影响业务。"""
+        recorder = self._recorder
+        if recorder is None:
+            return
+        finalize = getattr(recorder, "finalize_delivery", None)
+        if finalize is None:
+            return
+        try:
+            finalize()
+        except Exception as exc:  # 交付失败不影响业务返回
+            recorder.note_failure(f"feedback_write_failed:{type(exc).__name__}")
+
+
+def begin_startup(
+    environ: Optional[Mapping[str, str]] = None,
+) -> StartupFeedback:
+    """普通入口的启动收据；先建立身份，再谈解析与副作用。"""
+    try:
+        recorder = recorder_from_env(environ)
+    except Exception as exc:  # 防御：投影永远不成为业务失败的原因
+        logger.warning(f"反馈旁路不可用（不影响本次启动结果）: {type(exc).__name__}")
+        recorder = None
+    return StartupFeedback(recorder)

@@ -10,6 +10,9 @@ import sqlite3
 import sys
 from contextlib import closing
 from pathlib import Path
+from urllib.parse import quote
+
+from core.feedback import feedback_io_path
 
 OWNER = "meeting-converter"
 PUBLICATION = "mc-publication/1"
@@ -19,7 +22,7 @@ IDENTITY = ("owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_i
 HEX = re.compile(r"[a-f0-9]{64}")
 ROLES = {"original", "translated", "bilingual"}
 STALE_OUTPUTS = {"previous_translations_only", "stale_and_missing_translations"}
-SUCCEEDED = {"published_current", "published_incomplete", "reused_existing"}
+SUCCEEDED = {"published_current", "published_incomplete", "reused_existing", "published_degraded"}
 FAILED = {"published_partial", "write_failed", "transcription_failed", "translation_failed"}
 
 
@@ -81,7 +84,7 @@ def _validate(action, request):
 
 def _rows(path):
     try:
-        with path.open("rb") as stream:
+        with feedback_io_path(path).open("rb") as stream:
             for line in stream:
                 try:
                     value = json.loads(line, object_pairs_hook=_unique)
@@ -111,16 +114,17 @@ def _find_details(path, terminal):
 
 class OwnerRuntime:
     def __init__(self, db, sidecars, sidecar_dir):
-        self.db = db
+        self.db = feedback_io_path(db)
         self.sidecars = sidecars
-        self.sidecar_dir = sidecar_dir
+        self.sidecar_dirs = [sidecar_dir] if isinstance(sidecar_dir, Path) else sidecar_dir or []
 
     def _original(self, row, *, include_details=False):
         """Locate the exact occurrence and its sibling terminal, not an audio path."""
         scope = tuple(row[field] for field in IDENTITY[:-1])
         paths = list(self.sidecars)
-        if self.sidecar_dir is not None:
-            paths.extend(path for path in self.sidecar_dir.glob("*.jsonl") if not path.name.endswith(".details.jsonl"))
+        for directory in self.sidecar_dirs:
+            paths.extend(path for path in feedback_io_path(directory).glob("*.jsonl")
+                         if not path.name.endswith(".details.jsonl"))
         by_check, terminal_paths = {}, []
         for path in paths:
             for saved in _rows(path):
@@ -163,7 +167,7 @@ class OwnerRuntime:
     def read(self, key):
         if not _key(key) or not self.db.is_file():
             return None
-        uri = self.db.resolve().as_uri() + "?mode=ro"
+        uri = "file:" + quote(str(self.db.absolute()), safe="/") + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as connection:
             return self._get(connection, key)
 
@@ -316,7 +320,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, type=Path)
     parser.add_argument("--sidecar", action="append", type=Path, default=[])
-    parser.add_argument("--sidecar-dir", type=Path)
+    parser.add_argument("--sidecar-dir", action="append", type=Path, default=[])
     commands = parser.add_subparsers(dest="action", required=True)
     for action in (*ACTIONS, "reconcile"):
         commands.add_parser(action)
