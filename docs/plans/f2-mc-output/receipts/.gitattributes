@@ -1,0 +1,3 @@
+# Keep native delivery sample checksums valid on Windows checkouts.
+f4-sample-*.jsonl text eol=lf
+f4-sample-*.ready text eol=lf

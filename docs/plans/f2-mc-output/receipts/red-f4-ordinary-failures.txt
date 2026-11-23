@@ -1,0 +1,442 @@
+# RED 收据 —— tests/test_f4_ordinary_failures.py 在实现之前（基线 101124f）的真实失败
+#
+# 复现命令（在仓库根目录）：
+#   python -B docs/plans/f2-mc-output/receipts/make_f4_red_receipt.py
+#
+# 手工等价步骤：
+#   git worktree add --detach <TMP>/red-f4 101124f
+#   cp tests/test_f4_ordinary_failures.py tests/f4_child_runner.py <TMP>/red-f4/tests/
+#   cd <TMP>/red-f4 && python -B -m pytest -q -o addopts= -p no:cacheprovider \
+#       tests/test_f4_ordinary_failures.py
+#   git worktree remove --force <TMP>/red-f4
+#
+# 说明：基线提交的普通 CLI 没有默认交付，也没有翻译意图/引擎回退投影，
+# 因此这些用例因“一行观察都没有产生/默认交付不存在”而失败（对应审计
+# failure-coverage-20261121 第 23/24 行），不是因 import 错误失败。
+#
+FFFFFFFFFFFFFFFFFFF.FF.FFFF                                              [100%]
+================================== FAILURES ===================================
+________ TestStartupFailures.test_missing_input_is_a_request_rejection ________
+
+self = <test_f4_ordinary_failures.TestStartupFailures object at 0x0000019539A8D1D0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_missing_input_is_a_request_rejection(self, f4_root):
+        (f4_root / "audio.wav").unlink()
+        result = run_child(f4_root, "no-input")
+        assert result["exit"] == 1
+        assert "未找到音频文件" in result["stdout"].decode("utf-8", "replace")
+
+        deliveries = read_deliveries(f4_root, "default")
+>       assert len(deliveries) == 1, "默认启动也要留下交付"
+E       AssertionError: 默认启动也要留下交付
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:260: AssertionError
+_ TestStartupFailures.test_unknown_flag_rejects_the_request_with_native_exit_code _
+
+self = <test_f4_ordinary_failures.TestStartupFailures object at 0x0000019539A8DBD0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_unknown_flag_rejects_the_request_with_native_exit_code(self, f4_root):
+        result = run_child(f4_root, "invalid-cli", mode="default")
+>       assert result["exit"] == 2, "argparse 的原生退出码保留"
+E       AssertionError: argparse 的原生退出码保留
+E       assert 0 == 2
+
+tests\test_f4_ordinary_failures.py:276: AssertionError
+_ TestStartupFailures.test_existing_file_as_output_dir_is_a_local_io_failure __
+
+self = <test_f4_ordinary_failures.TestStartupFailures object at 0x000001953A040C30>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_existing_file_as_output_dir_is_a_local_io_failure(self, f4_root):
+        prepare_output(f4_root, "file")
+        result = run_child(f4_root, "output-dir")
+        assert result["exit"] == 1
+        deliveries = read_deliveries(f4_root, "default")
+>       assert deliveries
+E       assert []
+
+tests\test_f4_ordinary_failures.py:291: AssertionError
+___ TestStartupFailures.test_engine_init_failure_is_distinct_from_rejection ___
+
+self = <test_f4_ordinary_failures.TestStartupFailures object at 0x000001953A040E90>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_engine_init_failure_is_distinct_from_rejection(self, f4_root):
+        result = run_child(f4_root, "engine-init")
+        assert result["exit"] == 1
+        deliveries = read_deliveries(f4_root, "default")
+>       assert deliveries
+E       assert []
+
+tests\test_f4_ordinary_failures.py:304: AssertionError
+___ TestStartupFailures.test_successful_startup_carries_the_request_intent ____
+
+self = <test_f4_ordinary_failures.TestStartupFailures object at 0x0000019539A83890>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_successful_startup_carries_the_request_intent(self, f4_root):
+        result = run_child(f4_root, "explicit-off")
+        assert result["exit"] == 0
+        deliveries = read_deliveries(f4_root, "default")
+>       detail = startup_details(deliveries[0])[-1]
+                                 ^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:319: IndexError
+_ TestTranslationIntent.test_translator_unavailable_keeps_original_and_tells_why _
+
+self = <test_f4_ordinary_failures.TestTranslationIntent object at 0x0000019539A8D950>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_translator_unavailable_keeps_original_and_tells_why(self, f4_root):
+        """RED #1：默认入口、默认请求翻译、翻译器初始化失败。"""
+        result = run_child(f4_root, "translator-init")
+        assert result["exit"] == 0
+        original = f4_root / "out" / "audio_原文.txt"
+        assert original.is_file(), "原文真实产出"
+        assert "Revenue grew" in original.read_text(encoding="utf-8")
+
+        deliveries = read_deliveries(f4_root, "default")
+>       assert len(deliveries) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:340: AssertionError
+___ TestTranslationIntent.test_explicit_no_translate_is_an_expected_choice ____
+
+self = <test_f4_ordinary_failures.TestTranslationIntent object at 0x0000019539A8DF90>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_explicit_no_translate_is_an_expected_choice(self, f4_root):
+        result = run_child(f4_root, "explicit-off")
+        assert result["exit"] == 0
+>       rows = operation_rows(read_deliveries(f4_root, "default")[0]["rows"])
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:373: IndexError
+_ TestTranslationIntent.test_unavailable_translator_reads_differently_from_explicit_off _
+
+self = <test_f4_ordinary_failures.TestTranslationIntent object at 0x000001953A040FC0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_unavailable_translator_reads_differently_from_explicit_off(self, f4_root):
+        first = f4_root.parent / "f4-unavailable"
+        first.mkdir()
+        prepare_source(first)
+        run_child(first, "translator-init")
+        second = f4_root.parent / "f4-explicit"
+        second.mkdir()
+        prepare_source(second)
+        run_child(second, "explicit-off")
+
+        unavailable = one_check(
+>           operation_rows(read_deliveries(first, "default")[0]["rows"]),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "requested-outputs",
+        )
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:394: IndexError
+_ TestTranslationIntent.test_translation_failure_keeps_old_translations_marked _
+
+self = <test_f4_ordinary_failures.TestTranslationIntent object at 0x000001953A0410F0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_translation_failure_keeps_old_translations_marked(self, f4_root):
+        prepare_output(f4_root, "old-outputs")
+        result = run_child(f4_root, "translation-failure")
+>       assert result["exit"] == 0, "翻译失败不改业务退出码"
+E       AssertionError: 翻译失败不改业务退出码
+E       assert 1 == 0
+
+tests\test_f4_ordinary_failures.py:408: AssertionError
+______ TestEngineFallback.test_fallback_success_is_recorded_as_degraded _______
+
+self = <test_f4_ordinary_failures.TestEngineFallback object at 0x0000019539A8E0D0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_fallback_success_is_recorded_as_degraded(self, f4_root):
+        result = run_child(f4_root, "fallback-timeout")
+        assert result["exit"] == 0
+        original = f4_root / "out" / "audio_原文.txt"
+        assert "Revenue grew" in original.read_text(encoding="utf-8")
+        assert engine_calls(f4_root) == 2, "主引擎尝试一次，备用引擎一次"
+
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:439: IndexError
+_ TestEngineFallback.test_same_outer_failure_with_different_inner_cause_reads_differently _
+
+self = <test_f4_ordinary_failures.TestEngineFallback object at 0x0000019539A8E210>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+
+    def test_same_outer_failure_with_different_inner_cause_reads_differently(self, tmp_path):
+        first = tmp_path / "timeout-case"
+        first.mkdir()
+        prepare_source(first)
+        run_child(first, "fallback-timeout")
+        second = tmp_path / "valueerror-case"
+        second.mkdir()
+        prepare_source(second)
+        run_child(second, "fallback-valueerror")
+
+        def primary_chain(root):
+            delivery = read_deliveries(root, "default")[0]
+            return finished_details(delivery)["engine"]["primary_error"]
+
+>       timeout_case = primary_chain(first)
+                       ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_f4_ordinary_failures.py:473:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('<PYTEST_TMP>')
+
+    def primary_chain(root):
+>       delivery = read_deliveries(root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:470: IndexError
+___ TestEngineFallback.test_fallback_unavailable_is_a_transcription_failure ___
+
+self = <test_f4_ordinary_failures.TestEngineFallback object at 0x000001953A041220>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_fallback_unavailable_is_a_transcription_failure(self, f4_root):
+        result = run_child(f4_root, "fallback-unavailable")
+        assert result["exit"] == 1
+        assert engine_calls(f4_root) == 1, "备用创建失败：备用引擎没有运行"
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:483: IndexError
+____ TestEngineFallback.test_plain_provider_failure_keeps_the_cause_chain _____
+
+self = <test_f4_ordinary_failures.TestEngineFallback object at 0x000001953A041350>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_plain_provider_failure_keeps_the_cause_chain(self, f4_root):
+        result = run_child(f4_root, "provider-fail")
+        assert result["exit"] == 1
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:497: IndexError
+_____ TestEngineFallback.test_normal_primary_success_has_no_fallback_row ______
+
+self = <test_f4_ordinary_failures.TestEngineFallback object at 0x0000019539B0D010>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_normal_primary_success_has_no_fallback_row(self, f4_root):
+        result = run_child(f4_root, "explicit-off")
+        assert result["exit"] == 0
+>       rows = operation_rows(read_deliveries(f4_root, "default")[0]["rows"])
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:511: IndexError
+__ TestFailureRecordsAndRecovery.test_writer_failure_records_the_failed_role __
+
+self = <test_f4_ordinary_failures.TestFailureRecordsAndRecovery object at 0x0000019539A8E350>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_writer_failure_records_the_failed_role(self, f4_root):
+        prepare_output(f4_root, "original-is-dir")
+        result = run_child(f4_root, "writer-fail")
+        assert result["exit"] == 1
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:526: IndexError
+_ TestFailureRecordsAndRecovery.test_reuse_triggers_no_engine_and_no_translation _
+
+self = <test_f4_ordinary_failures.TestFailureRecordsAndRecovery object at 0x0000019539A8E490>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_reuse_triggers_no_engine_and_no_translation(self, f4_root):
+        prepare_output(f4_root, "original")
+        result = run_child(f4_root, "reuse")
+        assert result["exit"] == 0
+        assert not (f4_root / "engine-calls").exists(), "成功复用不触发远程服务"
+        assert (f4_root / "out" / "audio_原文.txt").read_text(encoding="utf-8") == OLD_ORIGINAL
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:541: IndexError
+_ TestFailureRecordsAndRecovery.test_kill_keeps_attempt_unknown_usage_and_reconciles_without_rerun _
+
+self = <test_f4_ordinary_failures.TestFailureRecordsAndRecovery object at 0x000001953A041480>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_kill_keeps_attempt_unknown_usage_and_reconciles_without_rerun(self, f4_root):
+        child = start_child(f4_root, "kill")
+        try:
+            wait_for(f4_root / "engine-calls")
+            child.kill()
+        finally:
+            child.wait(timeout=15)
+        deliveries = read_deliveries(f4_root, "default")
+>       assert len(deliveries) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:567: AssertionError
+_ TestFailureRecordsAndRecovery.test_kill_after_terminal_leaves_unconfirmed_delivery_window _
+
+self = <test_f4_ordinary_failures.TestFailureRecordsAndRecovery object at 0x000001953A0415B0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_kill_after_terminal_leaves_unconfirmed_delivery_window(self, f4_root):
+        child = start_child(f4_root, "kill-after-terminal")
+        try:
+            wait_for(f4_root / "terminal-written")
+            child.kill()
+        finally:
+            child.wait(timeout=15)
+        deliveries = read_deliveries(f4_root, "default")
+>       assert len(deliveries) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:594: AssertionError
+_ TestFailureRecordsAndRecovery.test_get_action_of_the_same_action_is_read_only _
+
+self = <test_f4_ordinary_failures.TestFailureRecordsAndRecovery object at 0x0000019539B0DD90>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_get_action_of_the_same_action_is_read_only(self, f4_root):
+        child = start_child(f4_root, "kill")
+        try:
+            wait_for(f4_root / "engine-calls")
+            child.kill()
+        finally:
+            child.wait(timeout=15)
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:616: IndexError
+____ TestDirectStartDelivery.test_dir_only_delivery_publishes_ready_files _____
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x0000019539A8E710>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_dir_only_delivery_publishes_ready_files(self, f4_root):
+        result = run_child(f4_root, "explicit-off", mode="dir")
+        assert result["exit"] == 0
+        deliveries = read_deliveries(f4_root, "dir")
+>       assert len(deliveries) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:648: AssertionError
+__ TestDirectStartDelivery.test_default_delivery_uses_the_mapped_state_root ___
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x000001953A041810>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_default_delivery_uses_the_mapped_state_root(self, f4_root):
+        result = run_child(f4_root, "explicit-off")
+        assert result["exit"] == 0
+        deliveries = read_deliveries(f4_root, "default")
+>       assert len(deliveries) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:656: AssertionError
+_ TestDirectStartDelivery.test_ready_marker_binds_occurrence_without_paths_or_commands _
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x0000019539B0E9F0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_ready_marker_binds_occurrence_without_paths_or_commands(self, f4_root):
+        run_child(f4_root, "explicit-off")
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:667: IndexError
+_________ TestDirectStartDelivery.test_delivery_details_are_redacted __________
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x00000195399EF240>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_delivery_details_are_redacted(self, f4_root):
+        run_child(f4_root, "fallback-timeout")
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:680: IndexError
+__ TestDirectStartDelivery.test_delivered_rows_carry_cross_process_identity ___
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x00000195399EFDF0>
+f4_root = WindowsPath('<PYTEST_TMP>')
+
+    def test_delivered_rows_carry_cross_process_identity(self, f4_root):
+        run_child(f4_root, "explicit-off")
+>       delivery = read_deliveries(f4_root, "default")[0]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_f4_ordinary_failures.py:690: IndexError
+_ TestDirectStartDelivery.test_two_tasks_are_isolated_by_their_own_delivery_files _
+
+self = <test_f4_ordinary_failures.TestDirectStartDelivery object at 0x0000019539A86C50>
+tmp_path = WindowsPath('<PYTEST_TMP>')
+
+    def test_two_tasks_are_isolated_by_their_own_delivery_files(self, tmp_path):
+        first = tmp_path / "task-a"
+        second = tmp_path / "task-b"
+        first.mkdir()
+        second.mkdir()
+        prepare_source(first)
+        prepare_source(second)
+        run_child(first, "explicit-off")
+        run_child(second, "explicit-off")
+        first_delivery = read_deliveries(first, "default")
+        second_delivery = read_deliveries(second, "default")
+>       assert len(first_delivery) == len(second_delivery) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_f4_ordinary_failures.py:710: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_f4_ordinary_failures.py::TestStartupFailures::test_missing_input_is_a_request_rejection
+FAILED tests/test_f4_ordinary_failures.py::TestStartupFailures::test_unknown_flag_rejects_the_request_with_native_exit_code
+FAILED tests/test_f4_ordinary_failures.py::TestStartupFailures::test_existing_file_as_output_dir_is_a_local_io_failure
+FAILED tests/test_f4_ordinary_failures.py::TestStartupFailures::test_engine_init_failure_is_distinct_from_rejection
+FAILED tests/test_f4_ordinary_failures.py::TestStartupFailures::test_successful_startup_carries_the_request_intent
+FAILED tests/test_f4_ordinary_failures.py::TestTranslationIntent::test_translator_unavailable_keeps_original_and_tells_why
+FAILED tests/test_f4_ordinary_failures.py::TestTranslationIntent::test_explicit_no_translate_is_an_expected_choice
+FAILED tests/test_f4_ordinary_failures.py::TestTranslationIntent::test_unavailable_translator_reads_differently_from_explicit_off
+FAILED tests/test_f4_ordinary_failures.py::TestTranslationIntent::test_translation_failure_keeps_old_translations_marked
+FAILED tests/test_f4_ordinary_failures.py::TestEngineFallback::test_fallback_success_is_recorded_as_degraded
+FAILED tests/test_f4_ordinary_failures.py::TestEngineFallback::test_same_outer_failure_with_different_inner_cause_reads_differently
+FAILED tests/test_f4_ordinary_failures.py::TestEngineFallback::test_fallback_unavailable_is_a_transcription_failure
+FAILED tests/test_f4_ordinary_failures.py::TestEngineFallback::test_plain_provider_failure_keeps_the_cause_chain
+FAILED tests/test_f4_ordinary_failures.py::TestEngineFallback::test_normal_primary_success_has_no_fallback_row
+FAILED tests/test_f4_ordinary_failures.py::TestFailureRecordsAndRecovery::test_writer_failure_records_the_failed_role
+FAILED tests/test_f4_ordinary_failures.py::TestFailureRecordsAndRecovery::test_reuse_triggers_no_engine_and_no_translation
+FAILED tests/test_f4_ordinary_failures.py::TestFailureRecordsAndRecovery::test_kill_keeps_attempt_unknown_usage_and_reconciles_without_rerun
+FAILED tests/test_f4_ordinary_failures.py::TestFailureRecordsAndRecovery::test_kill_after_terminal_leaves_unconfirmed_delivery_window
+FAILED tests/test_f4_ordinary_failures.py::TestFailureRecordsAndRecovery::test_get_action_of_the_same_action_is_read_only
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_dir_only_delivery_publishes_ready_files
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_default_delivery_uses_the_mapped_state_root
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_ready_marker_binds_occurrence_without_paths_or_commands
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_delivery_details_are_redacted
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_delivered_rows_carry_cross_process_identity
+FAILED tests/test_f4_ordinary_failures.py::TestDirectStartDelivery::test_two_tasks_are_isolated_by_their_own_delivery_files
+25 failed, 2 passed in 53.98s

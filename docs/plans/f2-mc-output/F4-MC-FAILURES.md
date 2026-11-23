@@ -1,6 +1,6 @@
 # F4-MC-FAILURES 转录启动、翻译意图和引擎回退反馈
 
-状态为待实施。工作目录为 `C:/Users/郑曾波/Projects/MeetingConverter`，发布线 `master`，审计基线 `e7b6c021c532c55a15a271c4bf690891b8f9cb93`，生产运行代码 `8b8e574f` 的相关路径一致。本仓已提供[转录归属和原动作查询](runtime.md)。现有 `.coverage` 修改和未跟踪 `.mimosa/` 不属于本卡。
+本仓源码与独立验收完成，冻结源码 0e3c4a396ef9f571989cc4543d23b34a840564bd，见[最终交接](handoff.md)。两处收件路径由 ROOT 统一接线。工作目录为 `C:/Users/郑曾波/Projects/MeetingConverter`，发布线 `master`，审计基线 `e7b6c021c532c55a15a271c4bf690891b8f9cb93`，生产运行代码 `8b8e574f` 的相关路径一致。本仓已提供[转录归属和原动作查询](runtime.md)。现有 `.coverage` 修改和未跟踪 `.mimosa/` 不属于本卡。
 
 ## 工作约定
 

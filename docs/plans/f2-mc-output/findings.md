@@ -60,3 +60,62 @@ writer 只有单文件原子性，流程既没有跨文件事务也没有逐轮�
 两个可重放的根因卡写在 `issues/`：`stale-output-success`（生产问题，状态
 verified）与 `transcribe-integration-fixture-merge`（测试夹具问题，状态
 verified）。两者分别归因，互不掩盖。
+
+## F4 普通入口失败的事实
+
+### F4-01 启动失败与转录失败的观察身份不同
+
+普通 CLI 在参数解析前没有运行身份，是四案启动失败零观察的根因（审计锚
+`transcribe.py:83`）。修复把 `run-started` 行放在解析之前：解析未完成只记录
+能确定的身份与阶段（parsing）；无输入/坏 CLI 是 `request_rejected`，输出目录
+不可用是 `local_io_failed`，引擎创建失败是 `initialization_failed`。启动收据
+step 前缀 `mc-startup/`，与逐文件操作的 `meeting-operation/` 互不混淆；强停
+之后新进程至少能读回启动行，把未确认区间标出来。
+
+### F4-02 翻译意图必须显式传入，不能从对象缺席推导
+
+审计锚 `core/pipeline.py:129` 的 `translate_requested=translator_obj is not None`
+把"翻译器创建失败"伪装成"用户主动关翻译"。修复后调用边界显式传
+`translate_requested` / `translator_ready` / `translator_error_type`，旧口径
+仅在参数缺省时保留（旧调用方行为不变）。`requested-outputs` 的 expected 因此
+仍如实报 `original_translated_bilingual_current`；actual 新增
+`translation_unavailable`（翻译被请求但从未运行），与 `previous_translations_only`
+等"翻译运行了但失败"的词分开；writer 行新增 `not_run` 与主动
+`not_requested` 分开。`transcribe.py` 配置加载失败导致翻译器缺席时，原因
+（如 FileNotFoundError）进入 details。
+
+### F4-03 成功回退是"成功与降级同时成立"
+
+审计锚 `engines/fallback.py` 吞掉主失败。修复后 FallbackEngine 按 transcribe
+调用记录事件：主失败脱敏因果链（只含异常类别，`__cause__`/`__context__`
+有界遍历）、备用引擎类名、备用创建失败原因。管道在计时器关闭后取走事件。
+一次成功的回退产生三处事实：`engine-fallback` 行（deviation）、终态
+`published_degraded`（deviation）、`requested-outputs` 照常 expected——产物
+符合请求与业务降级是两件事。`feedback_owner` 把 `published_degraded` 归入
+SUCCEEDED：对账说"作业已交付"，deviation 说"要审视主引擎"。
+
+### F4-04 默认交付：owner 自有持久收件目录
+
+普通入口失败必须能在"宿主没有设置任何反馈变量"时被读回（审计结论
+"根本没有默认观察"）。没有 `RESEARCH_FEEDBACK_OUT` 时，投影改为默认交付：
+`RESEARCH_FEEDBACK_DIR` 指定隔离收件目录，否则 `RESEARCH_FEEDBACK_STATE_ROOT`
+状态根下 `observations`，都缺省落本仓 `output/.feedback/observations`。
+交付文件 `feedback-<32 位小写 UUID hex>.jsonl` 用同目录临时文件整体重写 +
+原子替换发布，`.details.jsonl` 同法；进程终局补一次发布再原子写 `.ready`
+JSON 标记（owner/run_id/attempt_id/step_id，不含路径与命令）。三个窗口：
+强停在终局前 = 数据已落而 ready 未发（行仍可读、可对账）；ready 已发且回告
+丢失 = 按记录过的交付身份重开同一文件补发，观察身份去重保证只登记一次；
+并发读方只见完整文件（原子替换）。每个进程一个独立文件名，并发任务天然隔离。
+交付失败只影响交付状态：业务返回、原请求、计量原样。
+
+### F4-05 费用与用量保持未知
+
+本仓没有用量收据，`cost-receipt` 恒为 unknown；details 的 `usage` 写
+`{"known": false, "basis": "no_usage_receipt"}`。强停场景只保留启动/开始行，
+不编造终态与用量；reconcile 的 job_status 与 cost_state 均如实。
+
+## F4 独立接收发现
+
+- 多步日志外层曾沿用旧单步字段，总控的身份校验合理。生产者使用既有多步 wire，绑定步号、行数和原字节，接收方仍采用同一机制。
+- 只依赖单一位置会丢失普通操作反馈。原子写入失败时把同一身份投递到第二耐久目录。公开 owner 冷查询两处，Windows 长路径只在实际物理 I/O 边界处理。
+- 总控确认整包和业务费用结算应独立。原作业有明确终态但未留付费凭据时，保留费用 unknown 并禁止重发。

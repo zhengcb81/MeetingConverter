@@ -1,0 +1,6 @@
+# F4 交付样例生成摘要（真实运行）
+
+f4-sample-startup-rejected: exit=1 file=feedback-64fb5cab4f634962a7e4fca3315da232.jsonl ready=True
+f4-sample-translation-unavailable: exit=0 file=feedback-4681c1b280cc4d61bc2aded7d8be1e05.jsonl ready=True
+f4-sample-fallback-degraded: exit=0 file=feedback-ef27f81cc3fa48b78175070832660a59.jsonl ready=True
+f4-sample-started-only: exit=1 file=feedback-64ff0988302a4640ae1559f546c8b94d.jsonl ready=False

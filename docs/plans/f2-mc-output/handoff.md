@@ -1,4 +1,149 @@
-# MC-OUTPUT 交接 · F2-MC-OUTPUT 会议转录发布反馈
+# F4-MC-FAILURES 交接 · 普通入口的启动、翻译意图与引擎回退反馈
+
+**lane** `F4-MC-FAILURES` · **owner** `meeting-converter` · **状态** 作者独审三轮、本仓独立验收及补修均已完成，源码已在本仓 master。
+
+> F2 卡（MC-OUTPUT）的历史交接保留在本文件后半部分；作者原文与样例可从 b1acea5 查询。
+
+## 1. 身份与提交位置
+
+| 项目 | 值 |
+|---|---|
+| 卡号 | F4-MC-FAILURES（[F4-MC-FAILURES.md](F4-MC-FAILURES.md)） |
+| 工作目录 | `C:/Users/郑曾波/Projects/MeetingConverter`（主仓，发布线 `master`） |
+| 基线 | `101124f`（HEAD；工卡引用的审计基线 `e7b6c021` 与生产码 `8b8e574f` 在本卡相关路径上与之一致） |
+| 最终源码和独立复验版本 | 0e3c4a396ef9f571989cc4543d23b34a840564bd |
+| 发布分支 | master，按正常 Git 流程发布。 |
+| 对应原发生 | run `f4-coverage-audit-20261121`，attempt `baseline-e7b6c021`，`failure-coverage-20261121.jsonl` 第 23 行 `initialization/native-failure-not-forwarded` 与第 24 行 `fallback/degraded-work-hidden` |
+| 本仓 PWF | `docs/plans/f2-mc-output/`（progress/findings/runtime/receipts 的 F4 段落） |
+
+## 2. 写范围与披露
+
+卡面写范围内的改动：`transcribe.py`、`core/pipeline.py`、`core/feedback.py`、
+`engines/fallback.py`、`feedback_owner.py`、`tests/`（新测试 + 子进程运行器 +
+conftest 隔离 + 三处既有断言按新语义更新）、`docs/plans/f2-mc-output/`。
+
+一处超出卡面文件清单的披露：**`core/batch.py`** 仅新增
+`translate_requested` / `translator_ready` / `translator_error_type` 三个可选
+透传参数（默认 `None` 时行为与旧版逐字等价）。它是 `transcribe.py`（范围内）
+把请求意图传到 `core/pipeline.py`（范围内）的唯一通道；独审 H 项复核为最小
+改动、旧调用方零行为变化。
+
+## 3. RED 与 GREEN（真实运行）
+
+| 收据 | 命令 | 结果 |
+|---|---|---|
+| RED（基线 101124f 临时 worktree） | `python -B docs/plans/f2-mc-output/receipts/make_f4_red_receipt.py` | **25 failed / 2 passed**，0 import 错误（[red-f4-ordinary-failures.txt](receipts/red-f4-ordinary-failures.txt)）；独审重放 27 failed / 2 passed（重放时测试文件已多 2 用例，仍全红） |
+| F4 包 | `python -B -m pytest -o addopts= -p no:cacheprovider -q tests/test_f4_ordinary_failures.py` | **31 passed** |
+| 卡面回归四包 + f4 + fallback + batch + feedback_owner + output_feedback | 同上七个文件 | **130 passed**（8+48+19+10+31+4+10） |
+| 全量 | `python -B -m pytest -o addopts= -p no:cacheprovider -q` | **343 passed, 0 failed, 0 skipped** |
+| ruff | `python -B -m ruff check <13 个改动/新增文件>` | 告警构成与基线逐项相同（transcribe.py 9、conftest 2、batch 1 均为既有），**净增 0**，新文件 0 告警 |
+
+以上为作者结果。独立接收全量为 **345 passed**，Windows Python 3.13，52.03 秒。新增 RED 查出 wire 不相容、主目录不可写后的漏报，另以隔离长路径用例覆盖 Windows 收据写入和冷对账。反馈、owner 和新测试通过 Ruff。
+
+新测试全部以真实子进程调用普通 CLI（`tests/f4_child_runner.py` 只装配
+`sys.argv` 后 `raise SystemExit(transcribe.main())`），环境白名单清除
+`RESEARCH_FEEDBACK_*` 与一切密钥、桩住 config 读取；断言由测试进程在子进程
+退出后**冷读**交付文件得出。独审用独立探针复放了 11 场景矩阵与脱敏扫描。
+
+## 4. 对照清单（分母 = 审计探针 mc.py 注入的 10 个入口场景）
+
+| 探针场景 | 实测（冷读交付文件） | 状态 |
+|---|---|---|
+| no-input | exit 1；`startup-outcome actual=request_rejected`（stage=input），`invocations` 显示 engine/translation 未发送 | 已覆盖 |
+| invalid-cli | exit 2（argparse 原生保留）；`request_rejected`（stage=parsing，exit_code=2） | 已覆盖 |
+| output-dir | exit 1；`local_io_failed`（stage=output_dir，OSError 家族类别 + 相对代码位置） | 已覆盖 |
+| engine-init | exit 1；`initialization_failed`（stage=engine_init，ValueError），走真实工厂未桩 | 已覆盖 |
+| translator-init | exit 0；expected 仍 `original_translated_bilingual_current`，actual=`translation_unavailable`，writer `not_run`，终态 `published_incomplete`；原文 SHA=盘上字节、`fingerprint_source=committed_writer`；details `translation.unavailable_error_type=ValueError` | 已覆盖（两条 issue 关闭） |
+| fallback | exit 0；`engine-fallback primary_only→fallback_engaged`（deviation）、终态 `published_degraded`（deviation）、`requested-outputs` 仍 expected（成功与降级同时成立）；details 主失败链 `RuntimeError→TimeoutError` | 已覆盖 |
+| provider | exit 1；终态 `transcription_failed`；details errors 因果链含 `TimeoutError`；同外层内因 ValueError 的对照冷读可分辨 | 已覆盖 |
+| writer | exit 1；`writer-original failed`、sha256=None（失败角色不报提交指纹）；终态 `write_failed` | 已覆盖 |
+| reuse | exit 0；引擎/翻译零调用（signal 文件不存在）；`engine_not_started` + `reused_existing`；旧字节原样 | 已覆盖 |
+| kill | 强停后 `run-started` + `action-started` 可读、无终态无 cost 行；两次并发 reconcile 均 unconfirmed/unknown 且结果一致；engine_calls 前后差 0 | 已覆盖 |
+
+**强停/交付三窗口**：终态已写被强停 → 行可读、`.ready` 缺失、reconcile=succeeded；
+已发但回告丢失 → 按记录过的交付身份重开同一文件补发，观察身份去重零新增行；
+并发消费 → 读方循环冷读只见完整 JSON 行、终态不丢。
+
+**原因仍未知/未在现场实测**：符号链接输入（Windows 无特权建 symlink，沿 F2
+口径由 `Path.resolve()` 语义推断）；真实网络级 provider 故障（探针边界与审计
+一致，用本地替身）；`--help`（exit 0）记为 `accepted`（stage=parsing、
+exit_code=0、不产生逐文件行）——受理的合法调用，独审 info 项，语义如实写明。
+
+## 5. 直启发布接口（ROOT 接入要点）
+
+- 主收件目录为 C:/Users/郑曾波/Projects/MeetingConverter/output/.feedback/observations。写入故障使用本仓耐久恢复目录 C:/Users/郑曾波/Projects/MeetingConverter/output/.feedback/recovery。
+- ROOT 用现有 native_observation_dirs 订阅两处，owner 公开端口为每处各传一次 --sidecar-dir。RESEARCH_FEEDBACK_STATE_ROOT 可同时隔离 observations 与 recovery；RESEARCH_FEEDBACK_DIR 只改主收件路径。显式 RESEARCH_FEEDBACK_OUT 沿用单次文件契约。
+- 普通 CLI 每个进程使用独立的反馈名称、run/attempt 与明细。数据和明细写入后才生成 feedback-delivery-ready/1，记录 step_ids、两份行数和真实字节 SHA-256。中断时仍可读已有行。已确认的同内容交付不会重新打开 ready。
+- owner 的 reconcile 只读原作业。备用成功保持 succeeded 与 published_degraded，并保留原异常链。缺原用量凭证时保持 cost_unknown。恢复不调用转录或翻译。
+
+## 6. 可直接冷读的脱敏观察与明细
+
+四份样例均为真实运行产物（`python -B docs/plans/f2-mc-output/receipts/make_f4_samples.py` 再生）：
+
+| 文件 | 场景 | 行数 | 关键行 |
+|---|---|---|---|
+| [f4-sample-startup-rejected.jsonl](receipts/f4-sample-startup-rejected.jsonl) | 无输入，请求拒绝 | 2 | `startup-outcome accepted→request_rejected`（deviation） |
+| [f4-sample-translation-unavailable.jsonl](receipts/f4-sample-translation-unavailable.jsonl) | 默认请求翻译、翻译器初始化失败 | 10 | `requested-outputs →translation_unavailable`、writer-translated `not_run`、终态 `published_incomplete` |
+| [f4-sample-fallback-degraded.jsonl](receipts/f4-sample-fallback-degraded.jsonl) | 主引擎 TimeoutError、备用成功 | 11 | `engine-fallback →fallback_engaged`、终态 `published_degraded` |
+| [f4-sample-started-only.jsonl](receipts/f4-sample-started-only.jsonl) | 替身进入转录后强停 | 2 | 仅 `run-started` + `action-started`，**无 `.ready`** |
+
+同尝试的明细在同名 `.jsonl.details.jsonl`：`engine`（fallback_engaged /
+primary_error 链）、`translation`（requested/ran/unavailable/原因类别）、
+`usage`（known=false + basis）、errors（error_type + cause_types + location）。
+样例的 step/input_id 由临时路径散列而来、随运行变化；样例与 details 均无绝对
+路径、音频名与原始异常正文（独审脱敏扫描零命中）。
+
+## 7. 独审三轮发现与修复逐项关闭
+
+第一轮（候选=工作树 vs 101124f）：**PASS-WITH-FINDINGS**，无 blocker，9 条
+findings（4 minor / 5 info）；第二轮（当时树复核）：8 项全部 PASS，新发现
+1 条 major（finalize 门槛）、1 条 minor（本文件当时未补齐）、2 条 info；
+第三轮（finalize 修复后的最终树）：**PASS**——major 修复经穿过/耗尽两分支
+二分探针、确定性回归与专属测试三重证实，`_drain` 边界全部符合声明，无新
+blocker，无遗留必修项。
+逐项关闭（详见 [progress.md](progress.md)「F4 独审与修复」）：
+
+| # | 严重度 | 发现 | 关闭方式 |
+|---|---|---|---|
+| 1 | minor | progress.md 计数与树不符 | 按当前树更正（30/129/342），复审重跑一致 |
+| 2 | minor | 默认交付发布失败无回归 | 新增 `test_delivery_publish_failure_keeps_the_business_outcome` |
+| 3 | minor | `published_degraded` 无 reconcile 用例 | 新增 `test_degraded_publication_reconciles_as_a_delivered_job` |
+| 4 | minor | 交接 Markdown 缺 F4 段 | 本文件补齐 |
+| 5 | info | `--help` 记 accepted | 保留，语义写明（§4） |
+| 6 | info | 并发测试名不副实 | 改名 + 新增真并发读方用例 |
+| 7 | info | 发布失败的行不应进 `.ready` step 清单 | `record` 仅在落盘成功后计数 |
+| 8 | 复审新增 | **Windows 并发读者使 `os.replace` 瞬时失败时，撤行策略丢最后一批行（终态丢失）** | 发布失败保留内存行（重投不重复追加）+ 替换退避重试 4×10ms；差分探针 2/50 → 50/50 |
+| 9 | info | `.ready` step 清单口径 | 盘上播种 + 落盘成功才计数；表述为"盘上内容的下界" |
+| 10 | **major（第二轮）** | `finalize_delivery` 对观察/明细发布结果取 OR：观察失败而明细成功仍写 `.ready`，缓冲行滞留丢失 | 观察与明细分别 `_drain` 有界补投，任一未落盘返回 False 且**不写 `.ready`**——缺 ready 即未确认区间；专属回归 `test_finalize_without_published_observations_writes_no_ready`；第三轮复审确认 **PASS**（二分探针：常规压力补投穿过 50/50+ready；极限压力 finalize=False、无 ready=未确认区间；不存在"ready 已写但行滞留"） |
+
+## 8. 清理收据
+
+| 项 | 结果 |
+|---|---|
+| 开工前既有脏项 | `.coverage`（M）与 `.mimosa/`（??）保持原样，未进本卡 |
+| 测试临时根 | pytest 与两个收据脚本均用临时目录并在 finally 自清理；独审 agent 全部探针位于 `%TEMP%` 并自报清理完毕（两轮均核对了 `git status` 复原） |
+| 默认收件目录 | 作者已标注的 no-input 样本 feedback-97c4febaf48145d0aed9f69733bd103a 三件移至本仓 output/.feedback/acceptance-samples/author-20261121，SHA-256 与原字节相符。 |
+| 主仓工作树 | 仅本卡改动文件 + 上述既有脏项；独审一轮误写的 `.diff` 已由其自行删除并复核 |
+
+## 9. 独立验收
+
+作者的 ZCode 提交曾受 Mimosa 门禁影响。接收方按正常 Git 流程，在本仓 master 形成源码提交 0e3c4a396ef9f571989cc4543d23b34a840564bd。既有 .coverage、.mimosa/ 及其他工作树均未加入提交。
+
+本仓实际调用普通入口，独立 owner 子进程从两个目录查回原终态，费用保持 unknown，转录、翻译或供应商调用零新增。已再生 4 份原生样例；3 份完成标记均绑定真实字节，强停样例只有可读开始行。
+
+## 10. 总控组合边界
+
+使用实际 company-wiki local_host recover 与隔离的两路原生普通 CLI 交付复验。首次登记 21 行，两个包有 ACK，剩余和诊断均为 0。新进程再次恢复处理 0 行。原始观察与明细 4 个文件的 SHA 不变。主、备原始调用数仍各为 1、2。旧总控把费用未知和整包确认混在一起。修复后能确认已查回终态的交付，费用事实仍为 unknown。正式总控接线和原发生回告由 ROOT 执行。
+
+## 11. 机器摘要
+
+```json
+{"lane":"F4-MC-FAILURES","owner":"meeting-converter","base":"101124f","implementation":"0e3c4a396ef9f571989cc4543d23b34a840564bd","reviewed_commit":"0e3c4a396ef9f571989cc4543d23b34a840564bd","branch":"master","occurrences":["failure-coverage-20261121.jsonl#L23","failure-coverage-20261121.jsonl#L24"],"tests":[{"command":"python -B -m pytest -o addopts= -p no:cacheprovider -q tests/test_f4_ordinary_failures.py","result":"31 passed"},{"command":"python -B -m pytest -o addopts= -p no:cacheprovider -q tests/test_feedback_owner.py tests/test_output_feedback.py tests/test_pipeline.py tests/test_transcribe_integration.py tests/test_fallback.py tests/test_batch.py","result":"130 passed"},{"command":"python -B -m pytest -o addopts= -p no:cacheprovider -q","result":"343 passed"},{"command":"python -B -X utf8 -m pytest -q -p no:cacheprovider -o addopts= tests","result":"独立接收 Windows 3.13: 345 passed in 52.03s"}],"red":{"command":"python -B docs/plans/f2-mc-output/receipts/make_f4_red_receipt.py","result":"25 failed / 2 passed at 101124f"},"review":"作者独审 3 轮 + 独立接收 345 passed，补齐 wire、持久恢复和 Windows 长路径","sample_refs":["docs/plans/f2-mc-output/receipts/f4-sample-startup-rejected.jsonl","docs/plans/f2-mc-output/receipts/f4-sample-translation-unavailable.jsonl","docs/plans/f2-mc-output/receipts/f4-sample-fallback-degraded.jsonl","docs/plans/f2-mc-output/receipts/f4-sample-started-only.jsonl"],"default_inbox":"C:/Users/郑曾波/Projects/MeetingConverter/output/.feedback/observations","cleanup":"作者活样本保留原字节后迁至本仓试验归档。既有覆盖率和 Mimosa 产物未纳入提交。","remaining":["ROOT 订阅生产两处原生交付","ROOT 回告两条原发生"],"recovery_inbox":"C:/Users/郑曾波/Projects/MeetingConverter/output/.feedback/recovery"}
+```
+
+---
+
+# MC-OUTPUT 交接 · F2-MC-OUTPUT 会议转录发布反馈（历史）
 
 > 以下是 b1acea5 作者交接的历史说明和样例摘录。ROOT 复核后的源码、实测和再生样例以本卡 [进度](progress.md#2026-11-19-root-组合验收) 与现行 receipts 为准。作者原样例可从 b1acea5 查询。
 
@@ -16,11 +161,6 @@
 | 复审 SHA | `8806ff4`（三轮独立复审均覆盖到这棵树，逐项关闭表见 §5） |
 | 提交位置 | 本分支 `codex/f2-mc-output`，未推送、未并入 `master`；ROOT 负责接收并并入主线 |
 | 本仓 PWF | `docs/plans/f2-mc-output/`（`task_plan.md` / `findings.md` / `progress.md` / `issues/` / `receipts/`） |
-
-> 说明：`base`、`implementation`、`reviewed_commit` 都是可直接 `git show` 的实
-> SHA。三轮复审覆盖到 `8806ff4` 这棵树；每轮的发现与关闭方式见 §5 的三张表。
-> 各轮之间的差异可用 `git diff 6385f11..779aa1b`、`git diff 779aa1b..8806ff4`
-> 独立复核。
 
 ## 2. 交付了什么
 

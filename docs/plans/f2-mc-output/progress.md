@@ -159,3 +159,114 @@ Mimosa 提交前 L3 门禁拦的是**主仓既有文件**的 high（`tests/conft
 ## F4 公开运行端口
 
 新增本仓分诊、发布清单修复、复验、回告及只读恢复命令。指纹由实际提交 writer 提供，原任务结束后的覆盖不再串入原作业。运行、部署和恢复方式见 [运行端口](runtime.md)。最终本仓全量 310 项通过。
+
+## 2026-11-21 F4-MC-FAILURES · 普通入口失败覆盖
+
+依据 [F4-MC-FAILURES](F4-MC-FAILURES.md)，处理 run `f4-coverage-audit-20261121`
+attempt `baseline-e7b6c021` 的第 23/24 行两条原发生。开工起点：master@101124f，
+`.coverage` 既有改动与 `.mimosa/` 插件状态不属本卡。
+
+**RED（真实收据 `receipts/red-f4-ordinary-failures.txt`）**：新测试
+`tests/test_f4_ordinary_failures.py` 在基线 101124f 的临时 worktree 上
+25 failed / 2 passed，失败全部是行为断言（默认交付不存在、观察词缺失），
+0 import 错误。复现脚本 `receipts/make_f4_red_receipt.py`。
+
+**实施**：
+- `core/feedback.py`（→ meeting-converter-feedback/1.1.0）：新词
+  `translation_unavailable` / `published_degraded` / writer `not_run` /
+  新 check `engine-fallback` / 启动收据 `run-started`+`startup-outcome`
+  （step 前缀 `mc-startup/`）；errors 带脱敏因果链 `cause_types` 与本仓相对
+  `location`；details 补 `engine` / `translation` / `usage`（known=false，
+  basis=no_usage_receipt）；`DeliveringRecorder` 默认交付（同目录临时文件
+  原子重写发布 `feedback-<32hex>.jsonl`+同名 details，终局原子写 `.ready`
+  JSON 标记，含 owner/run/attempt/step_id 不含路径命令）；OUT 优先于
+  `RESEARCH_FEEDBACK_DIR`，DIR 优先于 `RESEARCH_FEEDBACK_STATE_ROOT` 下
+  `observations`，缺省落本仓 `output/.feedback/observations`。
+- `transcribe.py`：`main()` 在解析前经 `begin_startup()` 建立身份；
+  argparse 退出码保留（bad CLI=2，其余启动失败=1）；启动终态区分
+  request_rejected / initialization_failed / local_io_failed / accepted；
+  翻译意图（requested/ready/error_type）从初始边界显式传入。
+- `core/pipeline.py`：`transcribe_one` 增 `translate_requested` /
+  `translator_ready` / `translator_error_type` 显式参数（缺省沿旧推导口径，
+  旧调用方不受影响）；翻译器缺席不再记成"未请求"；`not_run` 与
+  `not_requested` 分开；FallbackEngine 事件在计时器关闭后取走。
+- `engines/fallback.py`：每次 transcribe 记录主失败脱敏因果链、备用是否
+  真的顶上、备用不可用的原因；`drain_engine_events()` 供投影取走。
+- `core/batch.py`：仅透传三个意图参数（默认 None，行为不变）——这是
+  transcribe.py→pipeline 传意图的唯一通道，超出了卡面写范围清单，
+  已在 handoff 标注。
+- `feedback_owner.py`：`published_degraded` 归入 SUCCEEDED（成功与降级
+  同时成立，deviation disposition 承载分诊信号）。
+- `tests/conftest.py`：autouse 把默认交付状态根映射到用例临时目录。
+- `tests/test_f4_ordinary_failures.py`（31 用例）+ `tests/f4_child_runner.py`：
+  真实子进程跑普通入口，白名单环境清除反馈变量与密钥；另启进程冷读。
+
+**GREEN**：F4 包 31 过；卡面回归四包 + test_fallback + test_batch +
+test_feedback_owner + test_output_feedback 定向合计 130 过；全量 343 过 0 失败。ruff：改动文件与本卡新文件告警构成与基线
+逐项相同（transcribe.py 9、batch 1、conftest 2 皆为既有；净增 0）。
+
+**对照（分母 = 审计探针 mc.py 注入的 10 个入口场景）**：
+- no-input / invalid-cli / output-dir / engine-init → startup-outcome 四词
+  齐备，确知未调用显示未发送（第 23 行关闭）；
+- translator-init → `translation_unavailable` + writer `not_run` +
+  `published_incomplete`（原文真实产出、已请求翻译、翻译未运行及原因同读）；
+- fallback → `engine-fallback fallback_engaged` + `published_degraded`；
+  provider → 终态 `transcription_failed` 且 details 因果链含 TimeoutError；
+  同外层 RuntimeError 内因 TimeoutError/ValueError 冷读可分辨（第 24 行关闭）；
+- writer / reuse / kill：writer 失败记原步骤且不报提交指纹；复用零远程调用；
+  强停保留原 attempt、无编造用量，两次并发 reconcile 幂等、get-action 只读；
+- 强停两窗口：引擎已启动→仅启动收据 unknown；终态已写→行可读、ready 未发、
+  reconcile=succeeded、计数零增量；补发按记录身份幂等；并发读只见完整文件。
+- 未在现场实测：符号链接输入、网络级 provider 故障（探针边界同审计）。
+
+**样例收据**（真实运行，`receipts/make_f4_samples.py` 再生）：startup-rejected
+2 行 / translation-unavailable 10 行 / fallback-degraded 11 行 /
+started-only 2 行无 ready。
+
+## 2026-11-21 F4 独审与修复
+
+独立审查 agent（未参与实现）对工作树候选（基线 101124f）给出
+**PASS-WITH-FINDINGS**：A–H 八项中七项 PASS，无 blocker；核心实现、真实入口、
+错误/费用语义、故障恢复、脱敏、并发幂等独立复核通过。findings 全部处理：
+
+1. progress.md 计数与当前树不符 → 按当前树改为 F4 包 30、定向 129、全量 342。
+2. 默认交付发布失败无回归 → 新增
+   `test_output_feedback.py::test_delivery_publish_failure_keeps_the_business_outcome`。
+3. `published_degraded` 无 reconcile 用例 → 新增
+   `test_feedback_owner.py::test_degraded_publication_reconciles_as_a_delivered_job`。
+4. 交接 Markdown 缺 F4 段 → 本次交付补齐（见 handoff.md）。
+5. `--help` 记为 accepted 属 info，保留并在 handoff 写明语义（受理的调用、
+   stage=parsing、exit_code=0，不产生逐文件行）。
+6. 并发测试名不副实 → 改名为
+   `test_published_delivery_is_complete_and_line_terminated`，另新增真并发读方
+   `test_concurrent_reader_never_sees_a_partial_file`。
+7. 发布失败的行不应进 `.ready` 的 step 清单 → `DeliveringRecorder.record`
+   仅在落盘成功后计数。
+8. **复审新增发现（实现方自查，复现于并发读测试）**：Windows 上并发读者持有
+   句柄会让 `os.replace` 瞬时失败；原实现失败即撤回内存行，最后一批行没有
+   下一次发布可搭乘，终态可能丢失。修复：发布失败改为**保留内存行**（同内容
+   重投不重复追加），`os.replace` 加 4×10ms 退避重试；下一次发布或
+   `finalize_delivery` 补投带走。真并发读方测试证实终态不再丢失
+   （独审差分探针：旧逻辑 2/50 行 vs 修复后 50/50）。
+9. `.ready` 的 step 清单是盘上内容的**下界**：重开播种 + 落盘成功才计数；
+   经后续整文件发布"搭车"落盘的行要等重开播种后才进清单（欠报不虚报）。
+10. **复审第二轮新发现（major）**：`finalize_delivery` 原来对观察/明细两个
+    文件的发布结果取 OR——观察发布失败而明细成功时仍写 `.ready`，缓冲行
+    滞留丢失。修复：观察与明细**分别**经 `_drain` 有界补投（20×(4×10ms+
+    50ms)），任一未落盘就返回 False 且不写 `.ready`——不留下指向不完整
+    交付的确认标记，缺 ready 即未确认区间。
+11. major #10 的修复补上专属回归
+    `test_finalize_without_published_observations_writes_no_ready`（观察补投
+    失败、明细成功 → finalize=False 且无 ready）；审查 agent 第三轮在最终树
+    上确认 **PASS**（常规压力补投穿过 50/50+ready、极限压力 finalize=False
+    无 ready 的二分探针 + 确定性回归 + 专属测试三重证实；测试数字 31/87/343
+    与文档一致）。
+
+修复后：F4 包 31 过、全量 343 过、ruff 与基线构成逐项相同净增 0。
+
+## 2026-11-23 F4 本仓独立接收
+
+- 版本 0e3c4a396ef9f571989cc4543d23b34a840564bd。Windows 3.13 全量 345 过（52.03 秒），改动反馈、owner 和子进程试验 Ruff 绿。
+- 独立 RED 发现标记不兼容及主目录不可写后的漏报。收敛既有多步 wire；用同一原交付身份补投本仓恢复目录，加入公开对账。文件读写和 SQLite 边界使用 Windows 扩展路径。
+- 实际再生四份样例并核对真字节。总控组合复验从两个实际目录登记 21 行、确认两个包，零诊断。第二轮处理 0 行，四份原观察和明细字节不变。恢复查询保持费用 unknown，转录、翻译和供应商调用零新增。
+- 原作者本地测试的三件套按原字节归档，排除真正生产配置、音频、历史覆盖率与 Mimosa 产物。
