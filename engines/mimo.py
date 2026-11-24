@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -21,6 +22,8 @@ from audio_utils import (
 )
 from engines.base import Segment, TranscriptionResult, UnsupportedFormatError
 from text_merger import merge_text_into_paragraphs
+
+logger = logging.getLogger(__name__)
 
 MIMO_API_URL = "https://api.xiaomimimo.com/v1/chat/completions"
 MIMO_MODEL = "mimo-v2.5-asr"
@@ -134,7 +137,20 @@ class MiMoEngine:
             except Exception as e:
                 if attempt < max_retries - 1:
                     wait = 2 ** (attempt + 1)
-                    logger.warning(f"MiMo API 重试 {attempt + 1}/{max_retries} ({wait}s): {e}")
+                    logger.warning(
+                        "MiMo API 重试 %d/%d (%ds): %s",
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        e,
+                        exc_info=True,
+                    )
                     time.sleep(wait)
                 else:
+                    logger.error(
+                        "MiMo API 失败（%d次重试后）: %s",
+                        max_retries,
+                        e,
+                        exc_info=True,
+                    )
                     raise EngineError(f"MiMo API 失败（{max_retries}次重试后）: {e}") from e

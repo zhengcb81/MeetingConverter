@@ -1083,10 +1083,10 @@ class OperationFeedback:
         for entry in pending:
             try:
                 self._recorder.record(**entry)
-            except BaseException as exc:  # 旁路的任何异常都不替换业务结果
-                self._recorder.note_failure(
-                    f"feedback_write_failed:{type(exc).__name__}"
-                )
+            except Exception as exc:  # 旁路的常规异常不替换业务结果，但保留中断信号并记日志
+                reason = f"feedback_write_failed:{type(exc).__name__}"
+                logger.warning("%s", reason, exc_info=True)
+                self._recorder.note_failure(reason)
 
     # ── 内部 ──────────────────────────────────────────────────────
 
