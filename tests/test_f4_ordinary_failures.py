@@ -247,6 +247,20 @@ def test_native_diagnostic_log_rotates_without_changing_parser_exit(f4_root):
     assert error["error_type"] == "SystemExit"
 
 
+def test_unavailable_stderr_never_routes_local_logging_notice_to_stdout(tmp_path, monkeypatch, capsys):
+    from core.local_diagnostics import cli_diagnostics
+
+    state = tmp_path / "diagnostic-state"
+    state.mkdir()
+    (state / "logs").touch()
+    monkeypatch.setenv("RESEARCH_FEEDBACK_STATE_ROOT", str(state))
+    with monkeypatch.context() as isolated:
+        isolated.setattr(sys, "stderr", None)
+        with cli_diagnostics("transcribe"):
+            pass
+    assert capsys.readouterr().out == ""
+
+
 def reconcile_request(row: dict):
     """构造 feedback-action/1 的 reconcile 信封（与探针同构）。"""
     row = dict(row, origin_owner=row.get("origin_owner") or row["owner"])

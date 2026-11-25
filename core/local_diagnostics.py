@@ -28,6 +28,8 @@ _ROTATE_BYTES = 1024 * 1024
 
 
 def _stderr_notice(code: str, error_type: str) -> None:
+    if sys.stderr is None:
+        return
     with suppress(OSError, ValueError):
         print(f"meeting-converter {code} error_type={error_type}", file=sys.stderr)
 
