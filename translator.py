@@ -9,9 +9,12 @@ import json
 import logging
 import re
 import time
-import urllib.request
 import urllib.error
+import urllib.request
+from typing import Any, Mapping, Union
 
+from config import Config, normalize_config
+from config import load_config as load_config
 from exceptions import TranslationError
 
 logger = logging.getLogger(__name__)
@@ -57,19 +60,17 @@ def apply_corrections(text: str, corrections: dict = None) -> str:
 class Translator:
     """DeepSeek LLM 翻译器 (带公司背景 + 自审校)"""
 
-    def __init__(self, config: dict):
-        self.api_key = config.get("deepseek_api_key", "")
-        self.base_url = config.get("deepseek_base_url", "https://api.deepseek.com")
-        self.model = config.get("deepseek_model", "deepseek-v4-flash")
-        self.max_retries = config.get("translate_max_retries", 3)
-        self.api_timeout = config.get("translate_api_timeout", 120)
-        self.paragraph_delay = config.get("translate_paragraph_delay", 0.3)
+    def __init__(self, config: Union[Config, Mapping[str, Any]]):
+        settings = normalize_config(config)
+        self.api_key = settings.deepseek_api_key
+        self.base_url = settings.deepseek_base_url
+        self.model = settings.deepseek_model
+        self.max_retries = settings.translate_max_retries
+        self.api_timeout = settings.translate_api_timeout
+        self.paragraph_delay = settings.translate_paragraph_delay
 
         if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
-            raise ValueError(
-                "请在 config.json 中设置 deepseek_api_key，"
-                "或确保 ~/earnings-transcripts/config.json 中有配置"
-            )
+            raise ValueError("请在 MeetingConverter 的 config.json 中设置 deepseek_api_key")
 
     def translate_paragraph(
         self, text: str, company_context: str = "", corrections: dict = None
@@ -139,31 +140,3 @@ class Translator:
         with urllib.request.urlopen(req, timeout=self.api_timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result["choices"][0]["message"]["content"].strip()
-
-
-def load_config(config_path: str = None) -> dict:
-    """加载配置文件。
-
-    搜索顺序：
-    1. config_path 参数（显式指定）
-    2. 项目目录 config.json
-
-    Returns:
-        配置字典
-
-    Raises:
-        FileNotFoundError: 找不到配置文件
-    """
-    import os
-
-    search = [
-        config_path,
-        os.path.join(os.path.dirname(__file__) or ".", "config.json"),
-    ]
-    for p in search:
-        if p and os.path.exists(p):
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-    raise FileNotFoundError(
-        "找不到配置文件，请确保项目目录下 config.json 存在"
-    )

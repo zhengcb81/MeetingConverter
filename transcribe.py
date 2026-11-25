@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 
+from config import Config, load_config, normalize_config
 from core.batch import get_audio_files, run_batch
 from core.feedback import (
     STARTUP_ACCEPTED,
@@ -35,7 +36,7 @@ from core.formatter import fmt_ts
 from core.pipeline import merge_into_paragraphs, transcribe_one
 from core.output import write_original, write_translated, write_bilingual
 from engines.factory import create_engine
-from translator import Translator, load_config
+from translator import Translator
 
 logger = logging.getLogger(__name__)
 from company import extract_company_from_filename, get_company_context, get_corrections
@@ -73,7 +74,7 @@ def _run(startup) -> int:
     parser.add_argument(
         "-m",
         "--model",
-        default="small",
+        default=Config.whisper_model,
         choices=["tiny", "base", "small", "medium", "large-v3", "turbo"],
     )
     parser.add_argument("-l", "--language", default=None)
@@ -82,16 +83,16 @@ def _run(startup) -> int:
     parser.add_argument("--prompt", default=None)
     parser.add_argument(
         "--engine",
-        default="auto",
+        default=Config.transcription_engine,
         choices=["auto", "mimo", "whisper"],
         help="转写引擎: auto(MiMo优先回退Whisper)/mimo/whisper",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="详细日志输出"
     )
-    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"])
+    parser.add_argument("--device", default=Config.whisper_device, choices=["cpu", "cuda", "auto"])
     parser.add_argument(
-        "--compute-type", default="int8", choices=["int8", "float16", "float32"]
+        "--compute-type", default=Config.whisper_compute_type, choices=["int8", "float16", "float32"]
     )
     parser.add_argument(
         "--force", action="store_true", help="强制重新处理已完成的文件"
@@ -148,11 +149,19 @@ def _run(startup) -> int:
 
     cfg = None
     config_error = None
+    cli_defaults = {
+        "whisper_model": args.model,
+        "whisper_device": args.device,
+        "whisper_compute_type": args.compute_type,
+    }
     try:
-        cfg = load_config()
+        raw = load_config()
+        if raw is not None:
+            cfg = normalize_config({**cli_defaults, **raw})
     except Exception as e:
         config_error = e
         logger.info(f"配置加载失败 (使用默认): {e}")
+    settings = cfg if cfg is not None else normalize_config(cli_defaults)
 
     translator_obj = None
     translator_error = None
@@ -173,13 +182,8 @@ def _run(startup) -> int:
         type(translator_error).__name__ if translator_error is not None else None
     )
 
-    whisper_model = (cfg or {}).get("whisper_model", args.model)
-    whisper_device = (cfg or {}).get("whisper_device", args.device)
-    whisper_compute_type = (cfg or {}).get("whisper_compute_type", args.compute_type)
-    merge_gap = (cfg or {}).get("paragraph_merge_gap_sec", 2.0)
-    para_max = (cfg or {}).get("paragraph_max_chars", 2000)
-    language = args.language or (cfg or {}).get("language")
-    engine_choice = args.engine or (cfg or {}).get("transcription_engine", "auto")
+    language = args.language or settings.language
+    engine_choice = args.engine or settings.transcription_engine
 
     prompt = args.prompt or {"zh": FINANCIAL_PROMPT_ZH, "en": FINANCIAL_PROMPT_EN}.get(
         language, FINANCIAL_PROMPT_MIXED
@@ -187,7 +191,8 @@ def _run(startup) -> int:
 
     try:
         engine = create_engine(
-            engine_choice, cfg, whisper_model, whisper_device, whisper_compute_type
+            engine_choice, settings, settings.whisper_model,
+            settings.whisper_device, settings.whisper_compute_type,
         )
     except Exception as exc:
         logger.info(f"错误: 转写引擎初始化失败: {exc}")
@@ -223,8 +228,8 @@ def _run(startup) -> int:
         initial_prompt=prompt,
         company_context_fn=get_company_ctx,
         corrections_fn=get_corrections_for,
-        merge_gap_sec=merge_gap,
-        paragraph_max_chars=para_max,
+        merge_gap_sec=settings.paragraph_merge_gap_sec,
+        paragraph_max_chars=settings.paragraph_max_chars,
         force=args.force,
         translate_requested=translate_requested,
         translator_ready=translator_ready,

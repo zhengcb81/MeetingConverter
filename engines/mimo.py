@@ -21,13 +21,13 @@ from audio_utils import (
     get_audio_duration,
     split_by_silence,
 )
+from config import DEFAULT_MIMO_URL as MIMO_API_URL
 from engines.base import TranscriptionResult, UnsupportedFormatError
 from exceptions import MAX_CAUSE_TYPES, EngineError
 from text_merger import merge_text_into_paragraphs
 
 logger = logging.getLogger(__name__)
 
-MIMO_API_URL = "https://api.xiaomimimo.com/v1/chat/completions"
 MIMO_MODEL = "mimo-v2.5-asr"
 MIME_MAP = {"wav": "audio/wav", "mp3": "audio/mpeg"}
 

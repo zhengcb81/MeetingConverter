@@ -46,7 +46,9 @@ cp config.example.json config.json
 | 键 | 类型 | 必填 | 默认值 | 说明 |
 |----|------|------|--------|------|
 | `mimo_api_key` | string | MiMo引擎必填 | - | MiMo ASR API 密钥 |
-| `mimo_base_url` | string | 否 | `https://token-plan-cn.xiaomimimo.com/v1/chat/completions` | API 地址（中国区） |
+| `mimo_base_url` | string | 否 | `https://api.xiaomimimo.com/v1/chat/completions` | 完整请求地址，显式值优先 |
+
+上方样例显式选择了 token-plan 地址。省略此字段时使用表中的开放平台地址。
 
 ### Whisper 配置
 

@@ -8,47 +8,43 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Mapping, Optional, Union
+
+from config import Config, normalize_config
 
 
 def create_engine(
-    engine_choice: str = "auto",
-    config: Optional[dict] = None,
-    whisper_model: str = "small",
-    whisper_device: str = "cpu",
-    whisper_compute_type: str = "int8",
+    engine_choice: str = Config.transcription_engine,
+    config: Optional[Union[Config, Mapping[str, Any]]] = None,
+    whisper_model: str = Config.whisper_model,
+    whisper_device: str = Config.whisper_device,
+    whisper_compute_type: str = Config.whisper_compute_type,
 ):
     """创建转写引擎实例。
 
     参数:
         engine_choice: "auto"（默认）/"mimo"/"whisper"。
-        config: 配置字典（读取 mimo_api_key/whisper_* 等）。
+        config: 运行配置或原配置字典（读取 MiMo 选项）。
         whisper_model/device/compute_type: Whisper 模型参数。
     """
-    config = config or {}
-
     if engine_choice == "whisper":
         return _create_whisper(whisper_model, whisper_device, whisper_compute_type)
+    if engine_choice not in ("mimo", "auto"):
+        raise ValueError(f"未知引擎: {engine_choice}（可选 auto/mimo/whisper）")
 
+    settings = normalize_config(config)
     if engine_choice == "mimo":
-        return _create_mimo(config)
-
-    if engine_choice == "auto":
-        return _create_auto(config, whisper_model, whisper_device, whisper_compute_type)
-
-    raise ValueError(f"未知引擎: {engine_choice}（可选 auto/mimo/whisper）")
+        return _create_mimo(settings)
+    return _create_auto(settings, whisper_model, whisper_device, whisper_compute_type)
 
 
-def _create_mimo(config: dict):
+def _create_mimo(config: Config):
     from engines.mimo import MiMoEngine
 
-    api_key = config.get("mimo_api_key", "")
+    api_key = config.mimo_api_key
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         raise ValueError("MiMo API key 未配置（config.mimo_api_key）")
-    base_url = config.get(
-        "mimo_base_url", "https://api.xiaomimimo.com/v1/chat/completions"
-    )
-    return MiMoEngine(api_key=api_key, base_url=base_url)
+    return MiMoEngine(api_key=api_key, base_url=config.mimo_base_url)
 
 
 def _create_whisper(model: str, device: str, compute_type: str):
@@ -59,11 +55,11 @@ def _create_whisper(model: str, device: str, compute_type: str):
 
 
 def _create_auto(
-    config: dict, whisper_model: str, whisper_device: str, whisper_compute_type: str
+    config: Config, whisper_model: str, whisper_device: str, whisper_compute_type: str
 ):
     from engines.fallback import FallbackEngine
 
-    mimo_key = config.get("mimo_api_key", "")
+    mimo_key = config.mimo_api_key
     if not mimo_key or mimo_key == "YOUR_API_KEY_HERE":
         return _create_whisper(whisper_model, whisper_device, whisper_compute_type)
 

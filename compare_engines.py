@@ -6,8 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+from config import load_config
 from engines.factory import create_engine
-from translator import load_config
 
 
 def compare_engines(audio_path: str, language: str = None):

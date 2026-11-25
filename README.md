@@ -148,7 +148,7 @@ python company_manager.py import-corr 小米集团 --file corrections.txt
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `mimo_api_key` | MiMo ASR API 密钥 | (必填，MiMo 引擎) |
-| `mimo_base_url` | MiMo API 地址 | `https://api.xiaomimimo.com` |
+| `mimo_base_url` | MiMo 完整请求地址 | `https://api.xiaomimimo.com/v1/chat/completions` |
 | `transcription_engine` | 引擎选择 | `auto` |
 | `deepseek_api_key` | DeepSeek 翻译 API 密钥 | (必填，翻译功能) |
 | `deepseek_base_url` | DeepSeek API 地址 | `https://api.deepseek.com` |
