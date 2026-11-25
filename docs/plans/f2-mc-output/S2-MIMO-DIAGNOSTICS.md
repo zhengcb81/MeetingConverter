@@ -3,8 +3,9 @@
 施工卡：[company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md](C:/Users/郑曾波/Projects/company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md)
 
 工作目录 `C:/Users/郑曾波/Projects/MeetingConverter`，发布线 `master`，基线
-`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。状态：实施、定向/全量回归与冷读完成；
-第一轮独立审查的 5 条发现已修复，待最终源码复核与提交。
+`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。状态：已提交
+`1bddabca6b61f899221598972e34162f32c1832c`；定向/全量回归、冷读与最终源码
+独审完成，待 ROOT 组合验收。
 
 ## 范围
 
@@ -123,7 +124,10 @@ tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
   要求非空、最多 8 项、每项为标识符，空列表回退原生链。transport 的音频
   匹配改为严格相等；两处重复策略随之收敛；三连空行等格式项已清理。最终
   定向 26 项、F4 33 项、全量 357 项通过。
-- 最终复核：第三/四轮已绑定最终源码树；提交后回填 SHA。
-- 最终提交：待提交（提交后回填 SHA）。
+- 最终复核：第三/四轮已绑定最终源码树；提交
+  `1bddabca6b61f899221598972e34162f32c1832c`。
+- 最终提交：`1bddabca6b61f899221598972e34162f32c1832c`，仅含本卡路径；
+  `.coverage`、`findings.md`、`progress.md`、`task_plan.md`、`.mimosa/`
+  保持既有未提交状态。
 - 交接给 ROOT：base、commit、本 PWF 链接、测试命令及结果、冷读引用、独审
   绑定的最终源码、临时数据处理说明。
