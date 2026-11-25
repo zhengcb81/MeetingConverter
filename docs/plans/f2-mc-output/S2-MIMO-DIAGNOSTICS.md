@@ -40,29 +40,36 @@ python -B -X utf8 -m pytest -o addopts= -q --tb=short \
   tests/test_s2_mimo_diagnostics.py tests/test_s1_logging_resilience.py
 ```
 
-实测 **8 failed / 3 passed**（0 import 错误）。失败均为行为断言：重试日志直接
+实测 **10 failed / 3 passed**（0 import 错误）。失败均为行为断言：重试日志直接
 打印 `HTTP Error 503: <供应商正文>` 和 traceback；耗尽后的 `EngineError` 正文
-带原文；fallback/批量出口复现同样的泄露。完整输出见
+带原文；fallback/批量出口复现同样的泄露；深链用例还复现了
+`URLError.reason` 追加后超过 8 项上限。完整输出见
 [`receipts/s2-mimo-red.txt`](receipts/s2-mimo-red.txt)。
 
+> 首版收据为 8 failed / 3 passed；独立复跑发现后加的深链用例未被收据覆盖，
+> 已用最终测试重新生成 10 failed / 3 passed。
+
 ## GREEN
+
+本机使用 `C:/Miniconda/python.exe`（pytest 9.1.1 / pytest-mock 3.15.1）；下面
+命令中的 `python` 指该解释器。
 
 ```text
 python -B -X utf8 -m pytest -o addopts= -q \
   tests/test_s2_mimo_diagnostics.py tests/test_s1_logging_resilience.py \
   tests/test_mimo_engine.py
-# 26 passed
+# 27 passed
 
 python -B -X utf8 -m pytest -o addopts= -q tests/test_f4_ordinary_failures.py
 # 33 passed
 
 python -B -X utf8 -m pytest -o addopts= -q
-# 357 passed
+# 358 passed
 ```
 
-`ruff check engines/mimo.py tests/test_s2_mimo_diagnostics.py
-tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
-`git diff --check` 无空白错误。
+`ruff check exceptions.py core/feedback.py engines/fallback.py engines/mimo.py
+tests/test_s2_mimo_diagnostics.py tests/test_s1_logging_resilience.py
+tests/f4_child_runner.py` 全通过；`git diff --check` 无空白错误。
 
 ## 冷读与契约
 
@@ -80,6 +87,10 @@ tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
   `startup-outcome=request_rejected`。
 - 合成凭据与供应商正文只存在于 transport 输入；stdout、stderr、observation
   和 details 均断言无泄露。
+- 冷读固定 `run_id=s2-mimo-run`、`attempt_id=s2-mimo-attempt`；`step_id`
+  每次运行生成，测试在同一 step 上断言 `requested-outputs` 与
+  `publication-outcome`。合成 WAV 的时长探针固定为 1.0 秒（避免 ffprobe
+  依赖）；网络/计费边界只有 transport 替身。
 
 ## 临时数据与边界
 
@@ -87,6 +98,9 @@ tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
 - 显式 `COVERAGE_FILE` 与 `-o addopts=` 运行，checkout 中既有 `.coverage`
   字节/时间保持原样；`findings.md`、`progress.md`、`task_plan.md` 与
   `.mimosa/` 未纳入本卡改动。
+- 仓根 `progress.md`/`task_plan.md` 仍保留上一会话的“S2 PAUSED”记录（既有
+  未提交）；本卡未改写，S2 完成状态以本 PWF 为准。`.workbuddy-ai/memory/`
+  为本会话记录，同样未纳入提交。
 - 既有 F2 harness worktree `_harness_worktrees/f2f/mc`（`codex/f2-mc-output@b1acea5`）
   已核对：工作树干净，未改 `engines/mimo.py` 或 `tests/f4_child_runner.py`，
   与本卡无重叠。
@@ -111,6 +125,10 @@ tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
   5. 低：未断言合成音频 base64 不外泄；`mimo` 与 `fallback` 的因果链实现
      分叉。修复：增加 base64 断言；`mimo` 侧改名为 `_cause_chain` 并明确
      返回含自身的完整链，投影侧按既有 `cause_types` 语义消费。
+  6. 中（独立复跑 RED 时发现）：深链 `URLError.reason` 追加后会超过 8 项
+     上限，`explicit_cause_types` 因此拒绝整条链，归因反而丢失。修复：
+     `exceptions.MAX_CAUSE_TYPES` 作为公共上限；链满时为立即原因让位
+     （移除最深层），保证总数仍为 8 且保留 `TimeoutError`；新增深链用例。
 - 第二轮独立复核：上述 5 条全部关闭；另提 2 条低/信息，已处理：
   - 投影侧原先信任任意异常的 `cause_types` 同名属性。修复：只信任本仓
     `EngineError`，并限制最多 8 项、每项须为标识符；新增伪造属性反例。
@@ -123,11 +141,18 @@ tests/test_s1_logging_resilience.py tests/f4_child_runner.py` 全通过；
   短路真实 `__cause__`；已把策略合并到 `exceptions.explicit_cause_types`，
   要求非空、最多 8 项、每项为标识符，空列表回退原生链。transport 的音频
   匹配改为严格相等；两处重复策略随之收敛；三连空行等格式项已清理。最终
-  定向 26 项、F4 33 项、全量 357 项通过。
-- 最终复核：第三/四轮已绑定最终源码树；提交
-  `1bddabca6b61f899221598972e34162f32c1832c`。
-- 最终提交：`1bddabca6b61f899221598972e34162f32c1832c`，仅含本卡路径；
-  `.coverage`、`findings.md`、`progress.md`、`task_plan.md`、`.mimosa/`
-  保持既有未提交状态。
+  定向 27 项、F4 33 项、全量 358 项通过。
+- 第五轮独立复跑 RED：在 base worktree 上按最终测试复现，发现首版收据漏记
+  后加的深链用例（当时 9 failed / 3 passed；最终测试为 10 failed / 3
+  passed），并复现 `URLError.reason` 追加后超过 8 项上限。已修复并重生成
+  收据，见上。
+- 最终复核：第三/四轮覆盖最终语义，第五轮独立复跑 RED；实施提交
+  `1bddabca6b61f899221598972e34162f32c1832c`，PWF 回填提交
+  `d70e74ba49dc6e578c78e8a534823ab679100f49` 及后续 PWF 修订；HEAD 以
+  `git log -1` 为准。
+- 最终提交：实施提交 `1bddabc`、PWF 回填 `d70e74b` 及其后续 PWF 修订，
+  仅含本卡路径；`.coverage`、`findings.md`、`progress.md`、`task_plan.md`、
+  `.mimosa/` 保持既有未提交状态。本地 `master` 领先 `origin/master`，尚未
+  推送。
 - 交接给 ROOT：base、commit、本 PWF 链接、测试命令及结果、冷读引用、独审
   绑定的最终源码、临时数据处理说明。

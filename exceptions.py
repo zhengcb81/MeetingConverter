@@ -2,6 +2,9 @@
 
 from typing import List, Optional
 
+#: 脱敏因果链的公共上限：MiMo 投影、F4 归因和显式 cause_types 共用。
+MAX_CAUSE_TYPES = 8
+
 
 class MeetingConverterError(Exception):
     """所有 MeetingConverter 异常的基类。"""
@@ -24,7 +27,7 @@ class ConfigError(MeetingConverterError):
 
 
 def explicit_cause_types(
-    error: BaseException, *, max_items: int = 8
+    error: BaseException, *, max_items: int = MAX_CAUSE_TYPES
 ) -> Optional[List[str]]:
     """读取本仓异常自带的、已脱敏的底层异常类别链。
 

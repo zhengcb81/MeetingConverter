@@ -194,6 +194,31 @@ class TestMiMoBoundaryDiagnostics:
         _assert_no_secret(str(error))
         _assert_no_secret("".join(traceback.format_exception(error)))
 
+    def test_deep_transport_chain_keeps_timeout_in_bounded_projections(self, mocker):
+        from core.feedback import _exception_cause_chain
+        from engines.fallback import _cause_types as fallback_cause_types
+
+        chain = [ValueError(), NameError(), SyntaxError(), LookupError(),
+                 KeyError(), TypeError(), OverflowError()]
+        for current, cause in zip(chain, chain[1:]):
+            current.__cause__ = cause
+        upstream = urllib.error.URLError(TimeoutError(VENDOR_BODY))
+        upstream.__cause__ = chain[0]
+        mocker.patch("engines.mimo.urllib.request.urlopen", side_effect=upstream)
+        mocker.patch("time.sleep")
+
+        engine = MiMoEngine(api_key=SYNTHETIC_KEY)
+        with pytest.raises(EngineError) as caught:
+            engine._call_api("data:audio/wav;base64,AAAA", "zh")
+
+        causes = caught.value.cause_types
+        assert len(causes) == 8
+        assert causes[:2] == ["URLError", "ValueError"]
+        assert "TimeoutError" in causes
+        assert "OverflowError" not in causes
+        assert _exception_cause_chain(caught.value) == causes
+        assert fallback_cause_types(caught.value) == causes
+
     def test_non_http_error_with_code_attribute_is_not_an_http_status(self, mocker):
         class ProviderError(Exception):
             code = 200

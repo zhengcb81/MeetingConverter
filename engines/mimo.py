@@ -22,7 +22,7 @@ from audio_utils import (
     split_by_silence,
 )
 from engines.base import TranscriptionResult, UnsupportedFormatError
-from exceptions import EngineError
+from exceptions import MAX_CAUSE_TYPES, EngineError
 from text_merger import merge_text_into_paragraphs
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,11 @@ def _cause_chain(error: BaseException) -> List[str]:
     chain: List[str] = []
     seen: set = set()
     current: Optional[BaseException] = error
-    while current is not None and id(current) not in seen and len(chain) < 8:
+    while (
+        current is not None
+        and id(current) not in seen
+        and len(chain) < MAX_CAUSE_TYPES
+    ):
         seen.add(id(current))
         name = type(current).__name__
         if name not in chain:
@@ -81,6 +85,10 @@ def _cause_chain(error: BaseException) -> List[str]:
     ):
         name = type(error.reason).__name__
         if name not in chain:
+            # 立即原因比最深的嵌套原因更贴近本次 transport 失败；链满时
+            # 让位给它，保证总数仍不超过公共上限。
+            if len(chain) >= MAX_CAUSE_TYPES:
+                chain.pop()
             chain.append(name)
     return chain
 
