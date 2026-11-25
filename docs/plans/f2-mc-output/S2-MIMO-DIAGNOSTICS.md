@@ -3,9 +3,8 @@
 施工卡：[company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md](C:/Users/郑曾波/Projects/company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md)
 
 工作目录 `C:/Users/郑曾波/Projects/MeetingConverter`，发布线 `master`，基线
-`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。状态：实施 `1bddabc`、深链上限
-修复 `45f5a6d`、PWF 回填 `d70e74b`；定向/全量回归、冷读与最终源码独审完成，
-待 ROOT 组合验收。
+`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。已验收发布至远端 `master@9f1adb0`。
+代码包括实施 `1bddabc` 与深链修复 `45f5a6d`。ROOT 独立复验与该源码版本的远端 CI 均已通过。
 
 ## 范围
 
@@ -155,7 +154,10 @@ tests/f4_child_runner.py` 全通过；`git diff --check` 无空白错误。
   PWF 修订；HEAD 以 `git log -1` 为准。
 - 最终提交：实施 `1bddabc`、深链修复 `45f5a6d`、PWF 回填 `d70e74b` 及后续
   PWF 修订，仅含本卡路径；`.coverage`、`findings.md`、`progress.md`、
-  `task_plan.md`、`.mimosa/` 保持既有未提交状态。本地 `master` 领先
-  `origin/master`，尚未推送。
-- 交接给 ROOT：base、commit、本 PWF 链接、测试命令及结果、冷读引用、独审
-  绑定的最终源码、临时数据处理说明。
+  `task_plan.md`、`.mimosa/` 保持既有未提交状态。
+- 2026-11-25 ROOT 独立复验 `test_s2_mimo_diagnostics.py`、`test_s1_logging_resilience.py`、
+  `test_mimo_engine.py`、`test_f4_ordinary_failures.py` 共 **60 项通过**。包含长异常链的
+  F4 与回退投影、首错后成功、耗尽与回退、公开 CLI 合法反例以及冷读。冷读未重复转录，
+  未确认用量保持未知。短隔离目录已清理。
+- 同日从 `8c97cc5` 正常快进至远端 `master@9f1adb065e54e2c7944e57ef395935ac6cca392e`，
+  已复查远端引用。该源码提交的 [远端 CI](https://github.com/zhengcb81/MeetingConverter/actions/runs/45563369033) 已通过。
