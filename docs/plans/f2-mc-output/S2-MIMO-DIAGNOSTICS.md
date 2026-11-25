@@ -3,9 +3,9 @@
 施工卡：[company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md](C:/Users/郑曾波/Projects/company-wiki/docs/plans/feedback-loop-2026-11-17/owner-cards/S2-MC-MIMO-DIAGNOSTICS.md)
 
 工作目录 `C:/Users/郑曾波/Projects/MeetingConverter`，发布线 `master`，基线
-`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。状态：已提交
-`1bddabca6b61f899221598972e34162f32c1832c`；定向/全量回归、冷读与最终源码
-独审完成，待 ROOT 组合验收。
+`8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5`。状态：实施 `1bddabc`、深链上限
+修复 `45f5a6d`、PWF 回填 `d70e74b`；定向/全量回归、冷读与最终源码独审完成，
+待 ROOT 组合验收。
 
 ## 范围
 
@@ -147,12 +147,12 @@ tests/f4_child_runner.py` 全通过；`git diff --check` 无空白错误。
   passed），并复现 `URLError.reason` 追加后超过 8 项上限。已修复并重生成
   收据，见上。
 - 最终复核：第三/四轮覆盖最终语义，第五轮独立复跑 RED；实施提交
-  `1bddabca6b61f899221598972e34162f32c1832c`，PWF 回填提交
-  `d70e74ba49dc6e578c78e8a534823ab679100f49` 及后续 PWF 修订；HEAD 以
-  `git log -1` 为准。
-- 最终提交：实施提交 `1bddabc`、PWF 回填 `d70e74b` 及其后续 PWF 修订，
-  仅含本卡路径；`.coverage`、`findings.md`、`progress.md`、`task_plan.md`、
-  `.mimosa/` 保持既有未提交状态。本地 `master` 领先 `origin/master`，尚未
-  推送。
+  `1bddabca6b61f899221598972e34162f32c1832c`、深链上限修复
+  `45f5a6d`、PWF 回填 `d70e74ba49dc6e578c78e8a534823ab679100f49` 及后续
+  PWF 修订；HEAD 以 `git log -1` 为准。
+- 最终提交：实施 `1bddabc`、深链修复 `45f5a6d`、PWF 回填 `d70e74b` 及后续
+  PWF 修订，仅含本卡路径；`.coverage`、`findings.md`、`progress.md`、
+  `task_plan.md`、`.mimosa/` 保持既有未提交状态。本地 `master` 领先
+  `origin/master`，尚未推送。
 - 交接给 ROOT：base、commit、本 PWF 链接、测试命令及结果、冷读引用、独审
   绑定的最终源码、临时数据处理说明。
