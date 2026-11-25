@@ -187,3 +187,84 @@ class TestCorrectionsAppliedInTranscribe:
         mock_translator.translate_paragraphs.assert_called_once()
         _, kwargs = mock_translator.translate_paragraphs.call_args
         assert kwargs["corrections"] == {"U7": "SU7"}
+
+
+def test_cli_context_uses_owned_company_record_without_reading_external_graph(
+    mock_engine, mock_translator, tmp_path, monkeypatch
+):
+    import builtins
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    import company
+    import transcribe
+
+    audio = tmp_path / "FinDeskAlias_20260701.mp3"
+    audio.write_bytes(b"synthetic audio")
+    output = tmp_path / "results"
+    catalog = tmp_path / "companies.yaml"
+    catalog.write_text(
+        yaml.safe_dump(
+            {
+                "合成子午集团": {
+                    "en": "Meridian Systems",
+                    "aliases": ["FinDeskAlias"],
+                    "ticker": "TEST",
+                    "sector": "系统",
+                    "products": ["合成产品"],
+                    "notes": "合成注意事项",
+                    "position": "本仓定位",
+                    "sectors": ["本仓板块甲", "本仓板块乙"],
+                    "corrections": {"AI leg": "AI segment"},
+                }
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf8",
+    )
+    external = tmp_path / "synthetic-home" / "company-wiki"
+    external.mkdir(parents=True)
+    graph = external / "graph.yaml"
+    graph.write_text(
+        "companies:\n  合成子午集团:\n    position: 外仓错误定位\n    sectors: [外仓错误板块]\n",
+        encoding="utf8",
+    )
+    reads = []
+    real_open = builtins.open
+
+    def observe_reads(file, *args, **kwargs):
+        if isinstance(file, (str, Path)) and Path(file) == graph:
+            reads.append(file)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", observe_reads)
+    monkeypatch.setattr(company, "COMPANIES_FILE", str(catalog))
+    monkeypatch.setattr(company, "COMPANY_WIKI_PATH", str(external), raising=False)
+    monkeypatch.setattr(transcribe, "load_config", lambda: {})
+    monkeypatch.setattr(transcribe, "create_engine", lambda *args: mock_engine)
+    monkeypatch.setattr(transcribe, "Translator", lambda cfg: mock_translator)
+    monkeypatch.setenv("RESEARCH_FEEDBACK_DIR", str(tmp_path / "feedback"))
+    monkeypatch.setenv("RESEARCH_FEEDBACK_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.delenv("RESEARCH_FEEDBACK_OUT", raising=False)
+    monkeypatch.setattr(sys, "argv", ["transcribe.py", str(audio), "--output", str(output)])
+
+    assert transcribe.main() == 0
+    assert reads == []
+    mock_engine.transcribe.assert_called_once()
+    mock_translator.translate_paragraphs.assert_called_once()
+    call = mock_translator.translate_paragraphs.call_args
+    assert call.kwargs["company_context"].splitlines() == [
+        "公司: 合成子午集团 (Meridian Systems)",
+        "代码: TEST",
+        "行业: 系统",
+        "主要产品: 合成产品",
+        "注意事项: 合成注意事项",
+        "定位: 本仓定位",
+        "板块: 本仓板块甲, 本仓板块乙",
+    ]
+    assert call.kwargs["corrections"] == {"AI leg": "AI segment"}
+    assert sorted(path.name for path in output.iterdir()) == sorted(
+        f"{audio.stem}_{role}.txt" for role in ("原文", "翻译", "中英对照")
+    )

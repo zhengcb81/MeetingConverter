@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import os
 import re
-import yaml
 from pathlib import Path
 
+import yaml
+
 COMPANIES_FILE = os.path.join(os.path.dirname(__file__) or ".", "companies.yaml")
-COMPANY_WIKI_PATH = os.path.expanduser("~/company-wiki")
 
 # 兜底映射 (companies.yaml 不存在时使用)
 _FALLBACK = {
@@ -56,13 +56,12 @@ def get_all_companies() -> dict:
     return data
 
 
-def _find_company_key(stem: str) -> str | None:
+def _find_company_key(stem: str, companies: dict) -> str | None:
     """在 companies 中查找匹配 stem 的公司中文名。
 
     匹配优先级：精确 > 最长子串 > 别名/英文名。
     多个子串匹配时选最长名（避免"小米"覆盖"小米集团"）。
     """
-    companies = get_all_companies()
     if stem in companies:
         return stem
     matches = [cn for cn in companies if cn in stem]
@@ -83,7 +82,7 @@ def _find_company_key(stem: str) -> str | None:
 def extract_company_from_filename(filename: str) -> str | None:
     """从文件名提取公司名"""
     stem = Path(filename).stem
-    found = _find_company_key(stem)
+    found = _find_company_key(stem, get_all_companies())
     if found:
         return found
     name = re.sub(r"\d{8}", "", stem).strip()
@@ -97,25 +96,30 @@ def get_company_context(company_name: str | None) -> str:
         return ""
 
     companies = get_all_companies()
-    context_parts = []
-    cn_name = _find_company_key(company_name) or company_name
+    cn_name = _find_company_key(company_name, companies) or company_name
     info = companies.get(cn_name)
-    if info:
-        parts = [
-            f"公司: {cn_name} ({info.get('en', '')})",
-            f"代码: {info.get('ticker', '')}",
-            f"行业: {info.get('sector', '')}",
-        ]
-        if "products" in info:
-            parts.append(f"主要产品: {', '.join(info['products'])}")
-        if "notes" in info:
-            parts.append(f"注意事项: {info['notes']}")
-        context_parts.append("\n".join(parts))
+    if not info:
+        return ""
 
-    wiki = _load_wiki_context(company_name)
-    if wiki:
-        context_parts.append(wiki)
-    return "\n\n".join(context_parts) if context_parts else ""
+    parts = [
+        f"公司: {cn_name} ({info.get('en', '')})",
+        f"代码: {info.get('ticker', '')}",
+        f"行业: {info.get('sector', '')}",
+    ]
+    if "products" in info:
+        parts.append(f"主要产品: {', '.join(info['products'])}")
+    if "notes" in info:
+        parts.append(f"注意事项: {info['notes']}")
+
+    position = info.get("position")
+    if isinstance(position, str) and position.strip():
+        parts.append(f"定位: {position.strip()}")
+    sectors = info.get("sectors")
+    if isinstance(sectors, list):
+        labels = [label.strip() for label in sectors if isinstance(label, str) and label.strip()]
+        if labels:
+            parts.append(f"板块: {', '.join(labels)}")
+    return "\n".join(parts)
 
 
 def get_corrections(company_name: str | None) -> dict[str, str]:
@@ -123,30 +127,5 @@ def get_corrections(company_name: str | None) -> dict[str, str]:
     if not company_name:
         return {}
     companies = get_all_companies()
-    cn_name = _find_company_key(company_name) or company_name
+    cn_name = _find_company_key(company_name, companies) or company_name
     return companies.get(cn_name, {}).get("corrections", {})
-
-
-def _load_wiki_context(company_name: str) -> str:
-    """从 company-wiki 加载补充信息"""
-    graph_path = os.path.join(COMPANY_WIKI_PATH, "graph.yaml")
-    if not os.path.exists(graph_path):
-        return ""
-
-    try:
-        with open(graph_path, "r", encoding="utf-8") as f:
-            graph = yaml.safe_load(f)
-    except Exception:
-        return ""
-
-    for cname, company in graph.get("companies", {}).items():
-        aliases = company.get("aliases", [])
-        if company_name in cname or company_name in aliases:
-            parts = []
-            if "position" in company:
-                parts.append(f"定位: {company['position']}")
-            if "sectors" in company:
-                parts.append(f"板块: {', '.join(company['sectors'])}")
-            return "\n".join(parts)
-
-    return ""

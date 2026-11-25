@@ -127,17 +127,18 @@ python company_manager.py import-corr 小米集团 --file corrections.txt
 - 纠正规则（Whisper 误识别修正）
 - 公司背景知识注入翻译上下文
 
-### company-wiki 集成
+### 补充翻译上下文
 
-可选：在 `~/company-wiki/graph.yaml` 添加公司补充信息，会自动加载到翻译上下文。
+在 MeetingConverter 的 `companies.yaml` 对应公司条目内填写可选的 `position` 和 `sectors`。此前存在旧 wiki graph 的值可按需复制到这个条目。
 
 ```yaml
-# ~/company-wiki/graph.yaml 示例
-companies:
-  小米集团:
-    position: "全球领先的智能硬件和IoT平台"
-    sectors: ["消费电子", "智能汽车", "AI"]
-    aliases: ["小米", "Xiaomi"]
+示例公司:
+  en: "Example Company"
+  ticker: "EXAMPLE"
+  sector: "系统"
+  aliases: ["ExampleCall"]
+  position: "系统和服务供应商"
+  sectors: ["软件", "服务"]
 ```
 
 ## 配置
