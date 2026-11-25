@@ -86,6 +86,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.output import WrittenOutput
+from exceptions import explicit_cause_types
 
 logger = logging.getLogger(__name__)
 
@@ -287,8 +288,12 @@ def _exception_cause_chain(error: BaseException) -> List[str]:
 
     外层异常的类别由 ``error_type`` 承担，这里只返回它的底层原因（``__cause__``
     优先，未抑制时 ``__context__`` 兜底），因此 TimeoutError 与另一个内因可以
-    冷读分辨。
+    冷读分辨。若异常自带已脱敏的 ``cause_types``（例如 MiMo 在切断原始链前
+    投影好的归因），优先使用它，避免为了安全而丢掉底层类别。
     """
+    explicit = explicit_cause_types(error)
+    if explicit is not None:
+        return explicit
     chain: List[str] = []
     seen: set = set()
     current: Optional[BaseException] = error

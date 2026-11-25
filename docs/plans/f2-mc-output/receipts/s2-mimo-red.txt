@@ -1,0 +1,278 @@
+# S2-MC-MIMO-DIAGNOSTICS RED receipt
+# base: 8c97cc5622c41db0e6e9c7d5d8618da074ff1ef5
+# command: python -B -X utf8 -m pytest -o addopts= -q --tb=short -p no:cacheprovider --basetemp=<TMP>/bt tests/test_s2_mimo_diagnostics.py tests/test_s1_logging_resilience.py
+# 说明：在 base 的临时 worktree 上复制本卡最终测试与 harness 后运行；失败全部是行为断言（脱敏字段缺失/原始正文泄露），无 import 错误。
+
+FFFFFFF..F.                                                              [100%]
+================================== FAILURES ===================================
+_ TestMiMoBoundaryDiagnostics.test_retry_warning_projects_sanitized_fields_without_traceback _
+tests\test_s2_mimo_diagnostics.py:123: in test_retry_warning_projects_sanitized_fields_without_traceback
+    assert "attempt=1/3" in message
+E   assert 'attempt=1/3' in 'MiMo API 重试 1/3 (2s): HTTP Error 503: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}'
+------------------------------ Captured log call ------------------------------
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 1/3 (2s): HTTP Error 503: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.HTTPError: HTTP Error 503: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+_ TestMiMoBoundaryDiagnostics.test_exhaustion_raises_original_type_with_sanitized_attribution _
+tests\test_s2_mimo_diagnostics.py:149: in test_exhaustion_raises_original_type_with_sanitized_attribution
+    assert "attempts=3" in message
+E   assert 'attempts=3' in 'MiMo API 失败（3次重试后）: HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}'
+------------------------------ Captured log call ------------------------------
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 1/3 (2s): HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.HTTPError: HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 2/3 (4s): HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.HTTPError: HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+ERROR    engines.mimo:mimo.py:150 MiMo API 失败（3次重试后）: HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.HTTPError: HTTP Error 500: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+____ TestMiMoBoundaryDiagnostics.test_non_http_failure_projects_no_status _____
+tests\test_s2_mimo_diagnostics.py:190: in test_non_http_failure_projects_no_status
+    assert error.error_type == "URLError"
+           ^^^^^^^^^^^^^^^^
+E   AttributeError: 'EngineError' object has no attribute 'error_type'
+------------------------------ Captured log call ------------------------------
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 1/3 (2s): <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.URLError: <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 2/3 (4s): <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.URLError: <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+ERROR    engines.mimo:mimo.py:150 MiMo API 失败（3次重试后）: <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.URLError: <urlopen error {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}>
+_ TestMiMoBoundaryDiagnostics.test_non_http_error_with_code_attribute_is_not_an_http_status _
+tests\test_s2_mimo_diagnostics.py:215: in test_non_http_error_with_code_attribute_is_not_an_http_status
+    assert error.error_type == "ProviderError"
+           ^^^^^^^^^^^^^^^^
+E   AttributeError: 'EngineError' object has no attribute 'error_type'
+------------------------------ Captured log call ------------------------------
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 1/3 (2s): {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+test_s2_mimo_diagnostics.TestMiMoBoundaryDiagnostics.test_non_http_error_with_code_attribute_is_not_an_http_status.<locals>.ProviderError: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 2/3 (4s): {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+test_s2_mimo_diagnostics.TestMiMoBoundaryDiagnostics.test_non_http_error_with_code_attribute_is_not_an_http_status.<locals>.ProviderError: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+ERROR    engines.mimo:mimo.py:150 MiMo API 失败（3次重试后）: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+test_s2_mimo_diagnostics.TestMiMoBoundaryDiagnostics.test_non_http_error_with_code_attribute_is_not_an_http_status.<locals>.ProviderError: {"error":"upstream body S2-MIMO-VENDOR-BODY","echoed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+_ TestRealEntryDiagnostics.test_retry_then_success_keeps_artifact_and_sanitized_observation _
+tests\test_s2_mimo_diagnostics.py:342: in test_retry_then_success_keeps_artifact_and_sanitized_observation
+    _assert_no_secret(result["stdout"])
+tests\test_s2_mimo_diagnostics.py:92: in _assert_no_secret
+    assert SYNTHETIC_KEY not in text
+E   assert 'S2-MIMO-SYN...OT-REAL-0001' not in '\r\n转写引擎: m...ess\\out\r\n'
+E     
+E     'S2-MIMO-SYNTHETIC-...NTIAL-NOT-REAL-0001' is contained here:
+E       oed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+E       Traceback (most recent call last):
+E         File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+E           with urllib.request.urlopen(req, timeout=300) as resp:
+E                ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^...
+E     
+E     ...Full output truncated (14 lines hidden), use '-vv' to show
+_ TestRealEntryDiagnostics.test_exhaustion_fails_without_leaking_vendor_text __
+tests\test_s2_mimo_diagnostics.py:379: in test_exhaustion_fails_without_leaking_vendor_text
+    _assert_no_secret(result["stdout"])
+tests\test_s2_mimo_diagnostics.py:92: in _assert_no_secret
+    assert SYNTHETIC_KEY not in text
+E   assert 'S2-MIMO-SYN...OT-REAL-0001' not in '\r\n转写引擎: m...r\n无文件处理\r\n'
+E     
+E     'S2-MIMO-SYNTHETIC-...NTIAL-NOT-REAL-0001' is contained here:
+E       oed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+E       Traceback (most recent call last):
+E         File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+E           with urllib.request.urlopen(req, timeout=300) as resp:
+E                ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^...
+E     
+E     ...Full output truncated (28 lines hidden), use '-vv' to show
+__ TestRealEntryDiagnostics.test_fallback_log_after_exhaustion_is_sanitized ___
+tests\test_s2_mimo_diagnostics.py:416: in test_fallback_log_after_exhaustion_is_sanitized
+    _assert_no_secret(result["stdout"])
+tests\test_s2_mimo_diagnostics.py:92: in _assert_no_secret
+    assert SYNTHETIC_KEY not in text
+E   assert 'S2-MIMO-SYN...OT-REAL-0001' not in '\r\n转写引擎: m...ess\\out\r\n'
+E     
+E     'S2-MIMO-SYNTHETIC-...NTIAL-NOT-REAL-0001' is contained here:
+E       oed_key":"S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"}
+E       Traceback (most recent call last):
+E         File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+E           with urllib.request.urlopen(req, timeout=300) as resp:
+E                ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^...
+E     
+E     ...Full output truncated (36 lines hidden), use '-vv' to show
+______ test_mimo_call_api_retries_and_logs_warning_instead_of_name_error ______
+tests\test_s1_logging_resilience.py:38: in test_mimo_call_api_retries_and_logs_warning_instead_of_name_error
+    assert "attempt=1/3" in retries[0].getMessage()
+E   assert 'attempt=1/3' in 'MiMo API 重试 1/3 (2s): <urlopen error transient network blip>'
+E    +  where 'MiMo API 重试 1/3 (2s): <urlopen error transient network blip>' = getMessage()
+E    +    where getMessage = <LogRecord: engines.mimo, 30, <BASE_WORKTREE>\engines\mimo.py, 140, "MiMo API 重试 %d/%d (%ds): %s">.getMessage
+------------------------------ Captured log call ------------------------------
+WARNING  engines.mimo:mimo.py:140 MiMo API 重试 1/3 (2s): <urlopen error transient network blip>
+Traceback (most recent call last):
+  File "<BASE_WORKTREE>\engines\mimo.py", line 134, in _call_api
+    with urllib.request.urlopen(req, timeout=300) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "<PYTHON>\Lib\unittest\mock.py", line 1232, in _execute_mock_call
+    raise result
+urllib.error.URLError: <urlopen error transient network blip>
+=========================== short test summary info ===========================
+FAILED tests/test_s2_mimo_diagnostics.py::TestMiMoBoundaryDiagnostics::test_retry_warning_projects_sanitized_fields_without_traceback
+FAILED tests/test_s2_mimo_diagnostics.py::TestMiMoBoundaryDiagnostics::test_exhaustion_raises_original_type_with_sanitized_attribution
+FAILED tests/test_s2_mimo_diagnostics.py::TestMiMoBoundaryDiagnostics::test_non_http_failure_projects_no_status
+FAILED tests/test_s2_mimo_diagnostics.py::TestMiMoBoundaryDiagnostics::test_non_http_error_with_code_attribute_is_not_an_http_status
+FAILED tests/test_s2_mimo_diagnostics.py::TestRealEntryDiagnostics::test_retry_then_success_keeps_artifact_and_sanitized_observation
+FAILED tests/test_s2_mimo_diagnostics.py::TestRealEntryDiagnostics::test_exhaustion_fails_without_leaking_vendor_text
+FAILED tests/test_s2_mimo_diagnostics.py::TestRealEntryDiagnostics::test_fallback_log_after_exhaustion_is_sanitized
+FAILED tests/test_s1_logging_resilience.py::test_mimo_call_api_retries_and_logs_warning_instead_of_name_error
+8 failed, 3 passed in 7.75s

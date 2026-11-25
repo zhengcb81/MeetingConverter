@@ -33,7 +33,10 @@ def test_mimo_call_api_retries_and_logs_warning_instead_of_name_error(mocker, ca
         result = eng._call_api("data:audio/wav;base64,abc", "zh")
 
     assert result == "ok after retry"
-    assert any("MiMo API 重试" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records)
+    retries = [rec for rec in caplog.records if "MiMo API 重试" in rec.getMessage()]
+    assert len(retries) == 1, "首错后成功只应有一条重试日志"
+    assert "attempt=1/3" in retries[0].getMessage()
+    assert retries[0].exc_info is None, "S2 起重试日志不再物化原始 traceback"
 
 
 def test_feedback_flush_propagates_keyboard_interrupt_and_logs_io_error(tmp_path, caplog):

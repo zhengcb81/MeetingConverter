@@ -15,11 +15,40 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import os
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 SIGNAL = "engine-calls"
+
+#: S2 MiMo 诊断场景的合成凭据与供应商正文：只作为 transport 输入，
+#: 不得出现在 stdout/stderr、失败消息或 F4 观察里。
+MIMO_SYNTHETIC_KEY = "S2-MIMO-SYNTHETIC-CREDENTIAL-NOT-REAL-0001"
+MIMO_VENDOR_BODY = (
+    '{"error":"upstream body S2-MIMO-VENDOR-BODY",'
+    f'"echoed_key":"{MIMO_SYNTHETIC_KEY}"}}'
+)
+MIMO_AUDIO_B64 = base64.b64encode(b"stub audio for mimo transport").decode("ascii")
+
+
+def _mark_engine_call(root: Path) -> None:
+    """原子追加一次引擎调用信号。
+
+    父进程的 ``wait_for`` 只看文件是否存在；先写临时文件再替换，避免
+    ``engine-calls`` 在内容落盘前就可见而被强杀，留下空文件。
+    """
+    signal = root / SIGNAL
+    try:
+        existing = signal.read_text(encoding="utf8")
+    except FileNotFoundError:
+        existing = ""
+    tmp = signal.with_name(SIGNAL + ".tmp")
+    tmp.write_text(existing + "called\n", encoding="utf8")
+    os.replace(tmp, signal)
 
 
 class WorkingEngine:
@@ -30,8 +59,7 @@ class WorkingEngine:
         self._sleep_after = sleep_after
 
     def transcribe(self, *args, **kwargs):
-        with (self._root / SIGNAL).open("a", encoding="utf8") as stream:
-            stream.write("called\n")
+        _mark_engine_call(self._root)
         if self._sleep_after:
             time.sleep(self._sleep_after)
         return _fixture_result()
@@ -45,8 +73,7 @@ class FailingPrimaryEngine:
         self._inner = inner
 
     def transcribe(self, *args, **kwargs):
-        with (self._root / SIGNAL).open("a", encoding="utf8") as stream:
-            stream.write("called\n")
+        _mark_engine_call(self._root)
         try:
             raise self._inner
         except Exception as inner:
@@ -72,6 +99,68 @@ def _fixture_result():
             Segment(35.0, 60.0, "Gross margin improved to 21.5%."),
         ],
     )
+
+
+class _MimoResponse:
+    """MiMo transport 替身的成功响应（上下文管理器）。"""
+
+    def __init__(self, content: str):
+        self._payload = json.dumps(
+            {"choices": [{"message": {"content": content}}]}
+        ).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._payload
+
+
+def _mimo_transport(root: Path, scenario: str):
+    """确定性 transport：首错后成功、重试耗尽或耗尽后回退。
+
+    只记录尝试序号与 HTTP 状态，不记录请求头、凭据或音频正文。
+    """
+    calls = []
+
+    def _append(record):
+        calls.append(record)
+        with (root / "mimo-calls.jsonl").open("a", encoding="utf8") as stream:
+            stream.write(json.dumps(record, sort_keys=True) + "\n")
+
+    def _fake_urlopen(request, timeout=None):
+        attempt = len(calls) + 1
+        record = {
+            "attempt": attempt,
+            "method": request.get_method(),
+            "url": request.full_url,
+        }
+        # 正向证明真实引擎把合成音频编码进了 outbound payload；只记布尔值，
+        # 不把 payload 或 base64 正文写进任何日志。
+        try:
+            payload = json.loads(request.data.decode("utf-8"))
+            data_url = payload["messages"][0]["content"][0]["input_audio"]["data"]
+            encoded = data_url.rsplit(",", 1)[-1]
+            record["audio_b64_present"] = encoded == MIMO_AUDIO_B64
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+            record["audio_b64_present"] = False
+        if scenario == "mimo-retry-success" and attempt > 1:
+            record["ok"] = True
+            _append(record)
+            return _MimoResponse("Revenue grew 30% year over year.")
+
+        status = 500 if scenario == "mimo-retry-exhausted" else 503
+        record["error_type"] = "HTTPError"
+        record["http_status"] = status
+        _append(record)
+        raise urllib.error.HTTPError(
+            request.full_url, status, MIMO_VENDOR_BODY, None, None
+        )
+
+    return _fake_urlopen
 
 
 def _install(repo: Path, root: Path, scenario: str):
@@ -116,6 +205,26 @@ def _install(repo: Path, root: Path, scenario: str):
             return stats
 
         transcribe.run_batch = run_batch_then_wait
+    elif scenario in (
+        "mimo-retry-success",
+        "mimo-retry-exhausted",
+        "mimo-fallback-success",
+    ):
+        # 真实 MiMoEngine + 确定性 transport：不访问网络、不外发音频。
+        import engines.mimo as mimo_module
+        from engines.mimo import MiMoEngine
+
+        time.sleep = lambda _seconds: None  # 固定重试退避，测试不真等 6 秒
+        mimo_module.get_audio_duration = lambda _path: 1.0
+        mimo_module.urllib.request.urlopen = _mimo_transport(root, scenario)
+        mimo = MiMoEngine(
+            api_key=MIMO_SYNTHETIC_KEY,
+            base_url="https://mimo.invalid/v1/chat/completions",
+        )
+        if scenario == "mimo-fallback-success":
+            engine = FallbackEngine(mimo, lambda: WorkingEngine(root))
+        else:
+            engine = mimo
     elif scenario == "translation-failure":
         # 翻译替身放在外部传输边界；引擎照常替换，不提前返回。
         from exceptions import TranslationError
@@ -151,7 +260,12 @@ def main() -> None:
         # 除翻译路径场景外显式关闭翻译；translator-init/translation-failure
         # 保持默认「请求翻译」。
         argv.append("--no-translate")
-    if scenario == "engine-init":
+    if scenario in (
+        "engine-init",
+        "mimo-retry-success",
+        "mimo-retry-exhausted",
+        "mimo-fallback-success",
+    ):
         argv.extend(["--engine", "mimo"])
     if scenario == "invalid-cli":
         argv.append("--unknown-fixture-option")

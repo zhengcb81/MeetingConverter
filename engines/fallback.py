@@ -11,12 +11,20 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from engines.base import TranscriptionResult, UnsupportedFormatError
+from exceptions import explicit_cause_types
 
 logger = logging.getLogger(__name__)
 
 
 def _cause_types(error: BaseException) -> List[str]:
-    """脱敏因果链：外层之外的底层异常类别，循环与超长链有界。"""
+    """脱敏因果链：外层之外的底层异常类别，循环与超长链有界。
+
+    若异常自带已脱敏的 ``cause_types``（例如 MiMo 切断原始链前投影的
+    归因），优先使用它，避免安全处理丢掉底层类别。
+    """
+    explicit = explicit_cause_types(error)
+    if explicit is not None:
+        return explicit
     chain: List[str] = []
     seen: set = set()
     current: Optional[BaseException] = error
