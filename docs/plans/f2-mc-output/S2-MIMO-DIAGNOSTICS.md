@@ -146,6 +146,9 @@ tests/f4_child_runner.py` 全通过；`git diff --check` 无空白错误。
   后加的深链用例（当时 9 failed / 3 passed；最终测试为 10 failed / 3
   passed），并复现 `URLError.reason` 追加后超过 8 项上限。已修复并重生成
   收据，见上。
+- 第六轮独立复核 RED（使用最终提交 `45f5a6d` 的三个测试文件）：**10 failed
+  / 3 passed**，与收据逐字符一致，失败名单包含深链用例；零 import 错误、
+  零真实网络、零真实密钥。
 - 最终复核：第三/四轮覆盖最终语义，第五轮独立复跑 RED；实施提交
   `1bddabca6b61f899221598972e34162f32c1832c`、深链上限修复
   `45f5a6d`、PWF 回填 `d70e74ba49dc6e578c78e8a534823ab679100f49` 及后续
