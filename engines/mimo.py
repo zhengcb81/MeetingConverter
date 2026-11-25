@@ -11,6 +11,8 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from contextlib import suppress
+from pathlib import Path
 from typing import List, Optional
 
 from audio_utils import (
@@ -22,6 +24,7 @@ from audio_utils import (
     split_by_silence,
 )
 from config import DEFAULT_MIMO_URL as MIMO_API_URL
+from core.local_diagnostics import record_failure
 from engines.base import TranscriptionResult, UnsupportedFormatError
 from exceptions import MAX_CAUSE_TYPES, EngineError
 from text_merger import merge_text_into_paragraphs
@@ -160,7 +163,7 @@ class MiMoEngine:
                 parts.append(self._call_api(audio_data, language))
             return "".join(parts)
         finally:
-            cleanup_chunks(chunks)
+            cleanup_chunks(chunks, source=Path(audio_path))
 
     def _encode_audio(self, path, fmt: str) -> str:
         with open(path, "rb") as f:
@@ -190,6 +193,7 @@ class MiMoEngine:
         max_retries = 3
         failure = None
         for attempt in range(max_retries):
+            response_received = False
             try:
                 payload = self._build_payload(audio_data_url, language)
                 data = json.dumps(payload).encode("utf-8")
@@ -203,15 +207,21 @@ class MiMoEngine:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=300) as resp:
-                    result = json.loads(resp.read().decode("utf-8"))
-                    return result["choices"][0]["message"]["content"].strip()
+                    body = resp.read()
+                    response_received = True
+                result = json.loads(body.decode("utf-8"))
+                return result["choices"][0]["message"]["content"].strip()
             except Exception as e:
                 # 只投影可公开的字段：供应商正文、请求原文和凭据留在
                 # transport 边界内，不进入重试日志、失败消息或 traceback。
                 diagnostic = _diagnostic_fields(
                     e, f"attempt={attempt + 1}/{max_retries}"
                 )
-                if attempt < max_retries - 1:
+                record_failure("mimo_request", e)
+                if isinstance(e, urllib.error.HTTPError):
+                    with suppress(OSError):
+                        e.close()
+                if not response_received and attempt < max_retries - 1:
                     wait = 2 ** (attempt + 1)
                     logger.warning(
                         "MiMo API 重试 %d/%d (%ds): %s",
@@ -222,19 +232,18 @@ class MiMoEngine:
                     )
                     time.sleep(wait)
                 else:
-                    failure_text = _diagnostic_fields(
-                        e, f"attempts={max_retries}"
-                    )
+                    attempts = attempt + 1
+                    failure_text = _diagnostic_fields(e, f"attempts={attempts}")
                     logger.error(
-                        "MiMo API 失败（%d次重试后）: %s",
-                        max_retries,
+                        "MiMo API 失败（%d次尝试后）: %s",
+                        attempts,
                         failure_text,
                     )
                     failure = EngineError(
-                        f"MiMo API 失败（{max_retries}次重试后）: {failure_text}"
+                        f"MiMo API 失败（{attempts}次尝试后）: {failure_text}"
                     )
                     # 业务层仍拿到原类型 EngineError；归因放在结构化属性上。
-                    failure.attempts = max_retries
+                    failure.attempts = attempts
                     failure.error_type = type(e).__name__
                     failure.http_status = _http_status(e)
                     failure.location = _source_location(e)

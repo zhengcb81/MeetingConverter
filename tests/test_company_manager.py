@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 import company_manager as cm
+import company
 
 
 @pytest.fixture
@@ -48,6 +50,25 @@ class TestLoadSave:
         cm.save_companies(sample_data)
         data = cm.load_companies()
         assert data == sample_data
+
+
+def test_cli_add_and_update_owner_context(companies_file, monkeypatch):
+    monkeypatch.setattr(company, "COMPANIES_FILE", str(companies_file))
+    monkeypatch.setattr(
+        sys, "argv", ["company_manager.py", "add", "Fixture", "--position", "初次定位",
+                      "--sectors", "芯片, 数据"]
+    )
+    cm.main()
+    assert "定位: 初次定位" in company.get_company_context("Fixture")
+    assert "板块: 芯片, 数据" in company.get_company_context("Fixture")
+
+    monkeypatch.setattr(
+        sys, "argv", ["company_manager.py", "update", "Fixture", "--position", "更新定位",
+                      "--sectors", "计算"]
+    )
+    cm.main()
+    assert "定位: 更新定位" in company.get_company_context("Fixture")
+    assert "板块: 计算" in company.get_company_context("Fixture")
 
 
 class TestCmdList:

@@ -8,6 +8,8 @@
 cp config.example.json config.json
 ```
 
+转写 CLI 中，显式引擎、语言、模型、设备与计算精度参数覆盖配置文件。其余字段沿用文件值，再使用默认值。显式 `--engine auto` 仍按配置的可用引擎选择。
+
 ## 完整配置示例
 
 ```json
@@ -72,19 +74,20 @@ cp config.example.json config.json
 | 键 | 类型 | 必填 | 默认值 | 说明 |
 |----|------|------|--------|------|
 | `translate_batch_size` | int | 否 | `5` | 批量翻译大小 |
-| `translate_max_retries` | int | 否 | `3` | 翻译重试次数 |
+| `translate_max_retries` | int | 否 | `3` | 正整数为总尝试次数，`0` 表示只尝试一次 |
 | `translate_api_timeout` | int | 否 | `120` | API 超时（秒） |
 | `translate_paragraph_delay` | float | 否 | `0.3` | 段落间延迟（秒） |
 
 ## 配置验证
 
-配置会在加载时自动验证：
+整份配置由 `Config.load()` 校验。CLI 在实际入口校验转写公共字段，并在创建对应提供方时校验该提供方的配置。仅转写时可保留未启用的翻译配置。
 
 - `deepseek_api_key` 不能为 `YOUR_API_KEY_HERE`
 - URL 必须以 `http://` 或 `https://` 开头
 - `paragraph_merge_gap_sec` 必须 >= 0
 - `paragraph_max_chars` 必须 >= 100
 - `translate_batch_size` 必须 >= 1
+- 数值字段拒绝布尔值，翻译超时为正整数，段落间延迟为有限非负数
 
 验证失败会抛出 `ConfigError` 异常。
 

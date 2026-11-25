@@ -16,6 +16,7 @@ from core.feedback import (
     begin_operation,
 )
 from core.formatter import fmt_ts
+from core.local_diagnostics import record_failure
 from core.output import write_bilingual, write_original, write_translated
 from engines.base import Segment
 from engines.fallback import FallbackEngine
@@ -224,7 +225,8 @@ def transcribe_one(
                                 progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
                             )
                         except TranslationError as e:
-                            logger.warning(f"翻译失败，跳过翻译文件: {e}")
+                            logger.warning("翻译失败，跳过翻译文件: %s", type(e).__name__)
+                            record_failure("translation", e)
                             feedback.note_error(e)
                             translations = None
                             translation_failed = True

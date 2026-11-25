@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,6 +17,7 @@ from audio_utils import (
     get_audio_duration,
     split_by_silence,
 )
+from exceptions import EngineError
 
 
 class TestDetectFormat:
@@ -106,16 +108,44 @@ class TestSplitBySilence:
         f.write_bytes(b"\x00" * (10 * 1024 * 1024))
         mocker.patch("audio_utils.get_audio_duration", return_value=300.0)
         mocker.patch("audio_utils._estimate_max_chunk_duration", return_value=100.0)
-        mocker.patch(
-            "audio_utils.subprocess.run",
-            side_effect=[
-                MagicMock(stderr=b"silence_start: 100.0\nsilence_start: 200.0"),
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-            ],
-        )
+        mocker.patch("audio_utils.tempfile.tempdir", str(tmp_path))
+
+        def run(args, **kwargs):
+            if "silencedetect=noise=-30dB:d=0.5" in args:
+                return CompletedProcess(
+                    args, 0, stderr=b"silence_start: 100.0\nsilence_start: 200.0"
+                )
+            Path(args[-1]).write_bytes(b"synthetic chunk")
+            return CompletedProcess(args, 0, stderr=b"")
+
+        mocker.patch("audio_utils.subprocess.run", side_effect=run)
         result = split_by_silence(f)
         assert len(result) >= 2
         assert result[0][1] == 0.0
         assert result[-1][2] == 300.0
+
+    @pytest.mark.parametrize("failed_stage", ["detection", "cut", "empty"])
+    def test_failed_ffmpeg_discards_only_owned_files(self, mocker, tmp_path, failed_stage):
+        source = tmp_path / "source.mp3"
+        source.write_bytes(b"synthetic original")
+        mocker.patch("audio_utils.tempfile.tempdir", str(tmp_path))
+        mocker.patch("audio_utils.get_audio_duration", return_value=10.0)
+        mocker.patch("audio_utils._estimate_max_chunk_duration", return_value=5.0)
+        cut_calls = []
+
+        def run(args, **kwargs):
+            if "silencedetect=noise=-30dB:d=0.5" in args:
+                return CompletedProcess(args, int(failed_stage == "detection"), stderr=b"")
+            chunk = Path(args[-1])
+            cut_calls.append(chunk)
+            if len(cut_calls) == 1:
+                chunk.write_bytes(b"synthetic first chunk")
+                return CompletedProcess(args, 0, stderr=b"")
+            return CompletedProcess(args, int(failed_stage == "cut"), stderr=b"")
+
+        mocker.patch("audio_utils.subprocess.run", side_effect=run)
+        with pytest.raises(EngineError, match="ffmpeg"):
+            split_by_silence(source)
+        assert source.read_bytes() == b"synthetic original"
+        assert list(tmp_path.glob("mimo_chunk_*")) == []
+        assert len(cut_calls) == (0 if failed_stage == "detection" else 2)

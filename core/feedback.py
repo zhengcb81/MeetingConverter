@@ -309,7 +309,7 @@ def _exception_cause_chain(error: BaseException) -> List[str]:
     return chain[1:]
 
 
-def _redacted_error(error: BaseException, location: str) -> Dict[str, Any]:
+def describe_error(error: BaseException, location: str) -> Dict[str, Any]:
     """一条脱敏异常记录：类别、脱敏因果链与本仓相对代码位置。"""
     return {
         "error_type": type(error).__name__,
@@ -538,9 +538,17 @@ def default_state_root() -> Path:
     return Path(__file__).resolve().parents[1] / "output" / ".feedback"
 
 
-def _state_root(environ: Mapping[str, str]) -> Path:
+def resolve_state_root(environ: Mapping[str, str]) -> Path:
     value = environ.get(FEEDBACK_STATE_ROOT_ENV)
     return Path(value.strip()) if isinstance(value, str) and value.strip() else default_state_root()
+
+
+def resolve_run_identity(environ: Mapping[str, str]) -> Tuple[str, str]:
+    run_id = environ.get(FEEDBACK_RUN_ID_ENV)
+    attempt_id = environ.get(FEEDBACK_ATTEMPT_ID_ENV)
+    return _PROCESS_RUN_ID if not _is_str(run_id) else run_id, (
+        "attempt-1" if not _is_str(attempt_id) else attempt_id
+    )
 
 
 def resolve_delivery_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
@@ -554,7 +562,7 @@ def resolve_delivery_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
     raw_dir = env.get(FEEDBACK_DIR_ENV)
     if isinstance(raw_dir, str) and raw_dir.strip():
         return Path(raw_dir.strip())
-    return _state_root(env) / "observations"
+    return resolve_state_root(env) / "observations"
 
 
 class DeliveringRecorder(FeedbackRecorder):
@@ -734,12 +742,7 @@ def recorder_from_env(
     global _LAST_RECORDER
 
     env = os.environ if environ is None else environ
-    run_id = env.get(FEEDBACK_RUN_ID_ENV)
-    if not _is_str(run_id):
-        run_id = _PROCESS_RUN_ID
-    attempt_id = env.get(FEEDBACK_ATTEMPT_ID_ENV)
-    if not _is_str(attempt_id):
-        attempt_id = "attempt-1"
+    run_id, attempt_id = resolve_run_identity(env)
 
     raw = env.get(FEEDBACK_OUT_ENV)
     if isinstance(raw, str) and raw.strip():
@@ -768,7 +771,7 @@ def recorder_from_env(
         try:
             recorder = DeliveringRecorder(
                 delivery_dir, run_id=run_id, attempt_id=attempt_id,
-                recovery_dir=_state_root(env) / "recovery",
+                recovery_dir=resolve_state_root(env) / "recovery",
             )
         except Exception as exc:
             logger.warning(f"反馈交付目录不可用（不影响本次转录结果）: {type(exc).__name__}")
@@ -1431,7 +1434,7 @@ class StartupFeedback:
             "step_id": self._step_id,
             "stage": stage,
             "exit_code": exit_code,
-            "errors": [_redacted_error(error, CLI_ERROR_LOCATION) for error in errors],
+            "errors": [describe_error(error, CLI_ERROR_LOCATION) for error in errors],
             "invocations": {
                 "engine_started": engine_started,
                 "translation_attempted": translation_attempted,

@@ -23,7 +23,7 @@ import sys
 import time
 from pathlib import Path
 
-from config import Config, load_config, normalize_config
+from config import load_config, normalize_config
 from core.batch import get_audio_files, run_batch
 from core.feedback import (
     STARTUP_ACCEPTED,
@@ -33,6 +33,7 @@ from core.feedback import (
     begin_startup,
 )
 from core.formatter import fmt_ts
+from core.local_diagnostics import cli_diagnostics, record_failure
 from core.pipeline import merge_into_paragraphs, transcribe_one
 from core.output import write_original, write_translated, write_bilingual
 from engines.factory import create_engine
@@ -58,11 +59,12 @@ FINANCIAL_PROMPT_MIXED = (
 
 def main():
     """普通入口：身份先于参数解析建立；启动失败按阶段记录，退出码保持原口径。"""
-    startup = begin_startup()
-    try:
-        return _run(startup)
-    finally:
-        startup.finalize()
+    with cli_diagnostics("transcribe"):
+        startup = begin_startup()
+        try:
+            return _run(startup)
+        finally:
+            startup.finalize()
 
 
 def _run(startup) -> int:
@@ -74,7 +76,6 @@ def _run(startup) -> int:
     parser.add_argument(
         "-m",
         "--model",
-        default=Config.whisper_model,
         choices=["tiny", "base", "small", "medium", "large-v3", "turbo"],
     )
     parser.add_argument("-l", "--language", default=None)
@@ -83,17 +84,14 @@ def _run(startup) -> int:
     parser.add_argument("--prompt", default=None)
     parser.add_argument(
         "--engine",
-        default=Config.transcription_engine,
         choices=["auto", "mimo", "whisper"],
         help="转写引擎: auto(MiMo优先回退Whisper)/mimo/whisper",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="详细日志输出"
     )
-    parser.add_argument("--device", default=Config.whisper_device, choices=["cpu", "cuda", "auto"])
-    parser.add_argument(
-        "--compute-type", default=Config.whisper_compute_type, choices=["int8", "float16", "float32"]
-    )
+    parser.add_argument("--device", choices=["cpu", "cuda", "auto"])
+    parser.add_argument("--compute-type", choices=["int8", "float16", "float32"])
     parser.add_argument(
         "--force", action="store_true", help="强制重新处理已完成的文件"
     )
@@ -104,6 +102,8 @@ def _run(startup) -> int:
         code = exc.code
         if not isinstance(code, int):
             code = 0 if code is None else 1
+        if code:
+            record_failure("parsing", exc)
         startup.record_outcome(
             STARTUP_ACCEPTED if code == 0 else STARTUP_REQUEST_REJECTED,
             stage="parsing",
@@ -125,6 +125,7 @@ def _run(startup) -> int:
     audio_files = get_audio_files(args.input)
     if not audio_files:
         logger.info("错误: 未找到音频文件")
+        record_failure("input", FileNotFoundError())
         startup.record_outcome(
             STARTUP_REQUEST_REJECTED,
             stage="input",
@@ -137,7 +138,8 @@ def _run(startup) -> int:
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        logger.info(f"错误: 输出目录不可用: {exc}")
+        logger.info("错误: 输出目录不可用: %s", type(exc).__name__)
+        record_failure("output_dir", exc)
         startup.record_outcome(
             STARTUP_LOCAL_IO_FAILED,
             stage="output_dir",
@@ -149,19 +151,25 @@ def _run(startup) -> int:
 
     cfg = None
     config_error = None
-    cli_defaults = {
-        "whisper_model": args.model,
-        "whisper_device": args.device,
-        "whisper_compute_type": args.compute_type,
-    }
+    cli_values = dict(
+        transcription_engine=args.engine,
+        language=args.language,
+        whisper_model=args.model,
+        whisper_device=args.device,
+        whisper_compute_type=args.compute_type,
+    )
+    overrides = {key: value for key, value in cli_values.items() if value is not None}
     try:
         raw = load_config()
         if raw is not None:
-            cfg = normalize_config({**cli_defaults, **raw})
+            candidate = normalize_config({**raw, **overrides})
+            candidate.validate_transcription()
+            cfg = candidate
     except Exception as e:
         config_error = e
-        logger.info(f"配置加载失败 (使用默认): {e}")
-    settings = cfg if cfg is not None else normalize_config(cli_defaults)
+        logger.info("配置加载失败 (使用默认): %s", type(e).__name__)
+        record_failure("config", e)
+    settings = cfg if cfg is not None else normalize_config(overrides)
 
     translator_obj = None
     translator_error = None
@@ -176,14 +184,15 @@ def _run(startup) -> int:
                 logger.info(f"翻译引擎: DeepSeek ({translator_obj.model})")
             except Exception as e:
                 translator_error = e
-                logger.info(f"翻译器不可用 (仅转写): {e}")
+                logger.info("翻译器不可用 (仅转写): %s", type(e).__name__)
+                record_failure("translator_init", e)
     translator_ready = translator_obj is not None
     translator_error_type = (
         type(translator_error).__name__ if translator_error is not None else None
     )
 
-    language = args.language or settings.language
-    engine_choice = args.engine or settings.transcription_engine
+    language = settings.language
+    engine_choice = settings.transcription_engine
 
     prompt = args.prompt or {"zh": FINANCIAL_PROMPT_ZH, "en": FINANCIAL_PROMPT_EN}.get(
         language, FINANCIAL_PROMPT_MIXED
@@ -195,7 +204,8 @@ def _run(startup) -> int:
             settings.whisper_device, settings.whisper_compute_type,
         )
     except Exception as exc:
-        logger.info(f"错误: 转写引擎初始化失败: {exc}")
+        logger.info("错误: 转写引擎初始化失败: %s", type(exc).__name__)
+        record_failure("engine_init", exc)
         startup.record_outcome(
             STARTUP_INITIALIZATION_FAILED,
             stage="engine_init",

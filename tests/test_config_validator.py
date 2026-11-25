@@ -43,6 +43,21 @@ class TestValidateConfig:
         with pytest.raises(ConfigError, match=">= 1"):
             validate_config(sample_config)
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "paragraph_merge_gap_sec",
+            "translate_batch_size",
+            "translate_max_retries",
+            "translate_api_timeout",
+            "translate_paragraph_delay",
+        ],
+    )
+    def test_boolean_values_are_not_numbers(self, sample_config, name):
+        sample_config[name] = True
+        with pytest.raises(ConfigError, match=name):
+            validate_config(sample_config)
+
     def test_valid_urls(self, sample_config):
         sample_config["deepseek_base_url"] = "https://api.deepseek.com"
         sample_config["mimo_base_url"] = "http://localhost:8080"

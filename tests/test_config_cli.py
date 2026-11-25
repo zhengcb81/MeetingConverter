@@ -94,7 +94,7 @@ typed_endpoint = typed_error = None
 if "--no-translate" not in options:
     try:
         typed_endpoint = config.Config.load().mimo_base_url
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, config.ConfigError) as error:
         typed_error = type(error).__name__
 (root / "result.json").write_text(json.dumps({
     "calls": called, "config_opens": cli_opens,
@@ -151,14 +151,60 @@ def test_cli_engine_and_typed_load_agree_on_the_same_config(tmp_path, explicit_u
     assert (tmp_path / "out/audio_中英对照.txt").is_file()
 
 
-def test_reference_cli_model_precedence_and_no_translate(tmp_path):
-    config = {"whisper_model": "medium", "deepseek_api_key": "YOUR_API_KEY_HERE"}
+def test_cli_explicit_parameters_override_the_config(tmp_path):
+    config = {
+        "transcription_engine": "mimo",
+        "whisper_model": "medium",
+        "whisper_device": "cpu",
+        "whisper_compute_type": "int8",
+        "language": "zh",
+        "deepseek_api_key": "YOUR_API_KEY_HERE",
+    }
     outcome = _run_cli(
         tmp_path, config, "--engine", "whisper", "--model", "tiny", "--device", "cuda",
         "--compute-type", "float16", "--language", "en", "--no-translate",
     )
     assert outcome["calls"] == [
+        {"kind": "local_engine", "model": "tiny", "device": "cuda", "compute_type": "float16"},
+        {"kind": "local_transcription", "language": "en"},
+    ]
+    assert {f.name for f in (tmp_path / "out").iterdir()} == {"audio_原文.txt"}
+
+
+def test_cli_without_engine_flags_uses_the_config(tmp_path):
+    config = {
+        "transcription_engine": "whisper",
+        "mimo_api_key": "synthetic-mimo-key",
+        "whisper_model": "medium",
+        "whisper_device": "cuda",
+        "whisper_compute_type": "float16",
+        "language": "en",
+    }
+    outcome = _run_cli(tmp_path, config, "--no-translate")
+    assert outcome["calls"] == [
         {"kind": "local_engine", "model": "medium", "device": "cuda", "compute_type": "float16"},
+        {"kind": "local_transcription", "language": "en"},
+    ]
+
+
+def test_explicit_auto_still_prefers_mimo(tmp_path):
+    config = {"transcription_engine": "whisper", "mimo_api_key": "synthetic-mimo-key"}
+    outcome = _run_cli(tmp_path, config, "--engine", "auto", "--no-translate")
+    assert len(outcome["calls"]) == 1
+    assert outcome["calls"][0]["kind"] == "speech"
+
+
+def test_bad_translation_setting_does_not_discard_transcription_settings(tmp_path):
+    config = {
+        "transcription_engine": "whisper",
+        "whisper_model": "medium",
+        "deepseek_api_key": "synthetic-translation-key",
+        "translate_max_retries": True,
+    }
+    result = _run_cli(tmp_path, config, "--language", "en")
+    assert result["typed_error"] == "ConfigError"
+    assert result["calls"] == [
+        {"kind": "local_engine", "model": "medium", "device": "cpu", "compute_type": "int8"},
         {"kind": "local_transcription", "language": "en"},
     ]
     assert {f.name for f in (tmp_path / "out").iterdir()} == {"audio_原文.txt"}

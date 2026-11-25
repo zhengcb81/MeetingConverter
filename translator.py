@@ -15,6 +15,7 @@ from typing import Any, Mapping, Union
 
 from config import Config, normalize_config
 from config import load_config as load_config
+from core.local_diagnostics import record_failure
 from exceptions import TranslationError
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ class Translator:
 
     def __init__(self, config: Union[Config, Mapping[str, Any]]):
         settings = normalize_config(config)
+        if not settings.deepseek_api_key or settings.deepseek_api_key == "YOUR_API_KEY_HERE":
+            raise ValueError("请在 MeetingConverter 的 config.json 中设置 deepseek_api_key")
+        settings.validate_translation()
         self.api_key = settings.deepseek_api_key
         self.base_url = settings.deepseek_base_url
         self.model = settings.deepseek_model
@@ -69,28 +73,30 @@ class Translator:
         self.api_timeout = settings.translate_api_timeout
         self.paragraph_delay = settings.translate_paragraph_delay
 
-        if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":
-            raise ValueError("请在 MeetingConverter 的 config.json 中设置 deepseek_api_key")
-
     def translate_paragraph(
         self, text: str, company_context: str = "", corrections: dict = None
     ) -> str:
         if not text.strip():
             return ""
 
-        for attempt in range(self.max_retries):
+        max_attempts = max(1, self.max_retries)
+        for attempt in range(max_attempts):
             try:
                 raw = self._call_api(text, company_context)
                 cleaned = self._clean_output(raw)
                 return apply_corrections(cleaned, corrections)
             except Exception as e:
-                if attempt < self.max_retries - 1:
+                record_failure("translate_request", e)
+                if attempt < max_attempts - 1:
                     wait = 2 ** (attempt + 1)
-                    logger.warning(f"  翻译重试 {attempt + 1}/{self.max_retries} ({wait}s): {e}")
+                    logger.warning(
+                        "  翻译重试 %d/%d (%ds): %s",
+                        attempt + 1, max_attempts, wait, type(e).__name__,
+                    )
                     time.sleep(wait)
                 else:
-                    logger.error(f"  翻译失败: {e}")
-                    raise TranslationError(f"翻译失败（{self.max_retries}次重试后）: {e}") from e
+                    logger.error("  翻译失败: %s", type(e).__name__)
+                    raise TranslationError(f"翻译失败（{max_attempts}次尝试后）") from e
 
     @staticmethod
     def _clean_output(text: str) -> str:

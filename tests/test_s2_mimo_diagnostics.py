@@ -24,6 +24,7 @@ import subprocess
 import sys
 import traceback
 import urllib.error
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,37 @@ def _http_error(status: int = 503) -> urllib.error.HTTPError:
         None,
         None,
     )
+
+
+def test_http_error_connection_is_closed_before_backoff(mocker):
+    body = BytesIO(b"synthetic HTTP error response")
+    error = urllib.error.HTTPError("https://mimo.invalid", 503, "retry", None, body)
+    request = mocker.patch(
+        "engines.mimo.urllib.request.urlopen", side_effect=[error, _Response("success")]
+    )
+
+    def check_closed(_wait):
+        assert body.closed
+
+    sleep = mocker.patch("engines.mimo.time.sleep", side_effect=check_closed)
+    MiMoEngine(api_key=SYNTHETIC_KEY)._call_api("data:audio/wav;base64,AAAA", "zh")
+    assert request.call_count == 2
+    sleep.assert_called_once_with(2)
+
+
+def test_malformed_received_response_never_reposts_audio(mocker):
+    request = mocker.patch(
+        "engines.mimo.urllib.request.urlopen",
+        side_effect=lambda *args, **kwargs: BytesIO(b'{"unrecognized":"provider payload"}'),
+    )
+    sleep = mocker.patch("engines.mimo.time.sleep")
+    with pytest.raises(EngineError) as caught:
+        MiMoEngine(api_key=SYNTHETIC_KEY)._call_api("data:audio/wav;base64,AAAA", "zh")
+    assert caught.value.error_type == "KeyError"
+    assert caught.value.attempts == 1
+    assert "provider payload" not in str(caught.value)
+    request.assert_called_once()
+    sleep.assert_not_called()
 
 
 def _assert_no_secret(text: str) -> None:

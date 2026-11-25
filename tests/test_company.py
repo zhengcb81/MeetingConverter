@@ -109,3 +109,12 @@ class TestFindCompanyKeyFallback:
         monkeypatch.setattr("company.COMPANIES_FILE", str(tmp_path / "noexist.yaml"))
         result = extract_company_from_filename("小米20240101.mp3")
         assert result in ("小米", "小米集团")
+
+
+def test_empty_yaml_company_is_safe_for_direct_and_alias_lookups(monkeypatch, tmp_path):
+    fixture = tmp_path / "companies.yaml"
+    fixture.write_text("Empty:\nKnown:\n  aliases: [ExampleAlias]\n", encoding="utf-8")
+    monkeypatch.setattr("company.COMPANIES_FILE", str(fixture))
+    assert get_company_context("Empty") == ""
+    assert get_corrections("Empty") == {}
+    assert extract_company_from_filename("ExampleAlias_20260101.mp3") == "Known"

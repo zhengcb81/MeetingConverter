@@ -202,6 +202,51 @@ def _digest(value) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def test_native_failure_has_a_redacted_cold_local_log(f4_root):
+    prepare_source(f4_root)
+    result = run_child(f4_root, "provider-fail")
+    assert result["exit"] == 1
+    owner_row = one_check(read_deliveries(f4_root, "default")[0]["rows"], "run-started")
+    log_path = f4_root / "state" / "logs" / "transcribe.jsonl"
+    text = log_path.read_text(encoding="utf-8")
+    rows = [json.loads(line) for line in text.splitlines()]
+    error, = [row for row in rows if row["stage"] == "batch"]
+    assert error["run_id"] == owner_row["run_id"]
+    assert error["attempt_id"] == owner_row["attempt_id"]
+    assert error["error_type"] == "RuntimeError"
+    assert error["cause_types"] == ["TimeoutError"]
+    assert "fixture-timeout" not in text
+    assert "fixture upstream failed" not in text
+    assert b"fixture-timeout" not in result["stderr"]
+
+
+def test_native_diagnostics_keep_the_exit_when_log_directory_is_blocked(f4_root):
+    (f4_root / "audio.wav").unlink()
+    (f4_root / "state").mkdir()
+    (f4_root / "state" / "logs").write_bytes(b"test prevents local logging")
+    result = run_child(f4_root, "no-input")
+    assert result["exit"] == 1
+    assert "错误: 未找到音频文件" in result["stdout"].decode("utf-8")
+    assert b"diagnostic_log_unavailable" in result["stderr"]
+    assert str(f4_root).encode("utf-8") not in result["stderr"]
+    startup = startup_details(read_deliveries(f4_root, "default")[0])
+    assert startup[0]["exit_code"] == 1
+
+
+def test_native_diagnostic_log_rotates_without_changing_parser_exit(f4_root):
+    log_path = f4_root / "state" / "logs" / "transcribe.jsonl"
+    log_path.parent.mkdir(parents=True)
+    previous = b"old protected log\n" * (1024 * 64)
+    log_path.write_bytes(previous)
+    result = run_child(f4_root, "invalid-cli")
+    assert result["exit"] == 2
+    assert b"unrecognized arguments" in result["stderr"]
+    assert log_path.with_suffix(".jsonl.1").read_bytes() == previous
+    error, = _read_jsonl(log_path)
+    assert error["stage"] == "parsing"
+    assert error["error_type"] == "SystemExit"
+
+
 def reconcile_request(row: dict):
     """构造 feedback-action/1 的 reconcile 信封（与探针同构）。"""
     row = dict(row, origin_owner=row.get("origin_owner") or row["owner"])

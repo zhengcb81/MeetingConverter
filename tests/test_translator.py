@@ -64,6 +64,23 @@ class TestTranslateParagraphCorrections:
 
 
 class TestTranslateParagraphRetry:
+    @pytest.mark.parametrize("fail_first", [False, True])
+    def test_zero_retries_runs_one_attempt(self, mocker, fail_first):
+        from translator import Translator
+
+        translator = Translator({"deepseek_api_key": "synthetic-key", "translate_max_retries": 0})
+        call = mocker.patch.object(translator, "_call_api", return_value="译文")
+        if fail_first:
+            call.side_effect = RuntimeError("synthetic failure")
+        sleep = mocker.patch("translator.time.sleep")
+        if fail_first:
+            with pytest.raises(TranslationError):
+                translator.translate_paragraph("原文")
+        else:
+            assert translator.translate_paragraph("原文") == "译文"
+        call.assert_called_once()
+        sleep.assert_not_called()
+
     def test_retries_on_failure(self, translator, mocker):
         mocker.patch.object(
             translator, "_call_api", side_effect=[Exception("net"), "结果"]

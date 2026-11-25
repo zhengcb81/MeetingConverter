@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from exceptions import EngineError
+
 MIMO_SUPPORTED = {"wav", "mp3"}
 MAX_BASE64_MB = 4.0
 
@@ -117,6 +119,8 @@ def split_by_silence(
         ],
         capture_output=True,
     )
+    if detect.returncode:
+        raise EngineError(f"ffmpeg 静音检测失败 (exit={detect.returncode})")
     silence_starts = _parse_silence_starts(detect.stderr.decode("utf-8", errors="replace"))
 
     if not silence_starts:
@@ -129,36 +133,45 @@ def split_by_silence(
     chunks = _choose_split_points(silence_starts, total_duration, max_chunk_duration)
     result: List[Tuple[Path, float, float]] = []
     src_ext = Path(path).suffix
-    for i, (start, end) in enumerate(chunks):
-        # 使用 NamedTemporaryFile 自动清理
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=src_ext, prefix=f"mimo_chunk_{i}_")
-        os.close(tmp_fd)
-        tmp = Path(tmp_path)
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-ss",
-                str(start),
-                "-to",
-                str(end),
-                "-i",
-                str(path),
-                "-c",
-                "copy",
-                str(tmp),
-            ],
-            capture_output=True,
-        )
-        result.append((tmp, start, end))
-    return result
+    complete = False
+    try:
+        for i, (start, end) in enumerate(chunks):
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=src_ext, prefix=f"mimo_chunk_{i}_")
+            tmp = Path(tmp_path)
+            result.append((tmp, start, end))
+            os.close(tmp_fd)
+            cut = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    str(start),
+                    "-to",
+                    str(end),
+                    "-i",
+                    str(path),
+                    "-c",
+                    "copy",
+                    str(tmp),
+                ],
+                capture_output=True,
+            )
+            if cut.returncode:
+                raise EngineError(f"ffmpeg 切片失败 (exit={cut.returncode})")
+            if not tmp.stat().st_size:
+                raise EngineError("ffmpeg 切片为空")
+        complete = True
+        return result
+    finally:
+        if not complete:
+            cleanup_chunks(result)
 
 
-def cleanup_chunks(chunks: List[Tuple[Path, float, float]]) -> None:
+def cleanup_chunks(chunks: List[Tuple[Path, float, float]], *, source=None) -> None:
     """清理切片产生的临时文件（跳过原始文件）。"""
     for chunk_path, _start, _end in chunks:
         try:
-            if chunk_path.exists() and "mimo_chunk_" in chunk_path.name:
-                chunk_path.unlink()
+            if chunk_path != source and chunk_path.name.startswith("mimo_chunk_"):
+                chunk_path.unlink(missing_ok=True)
         except OSError:
             pass

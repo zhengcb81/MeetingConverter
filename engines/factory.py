@@ -44,6 +44,7 @@ def _create_mimo(config: Config):
     api_key = config.mimo_api_key
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         raise ValueError("MiMo API key 未配置（config.mimo_api_key）")
+    config.validate_mimo()
     return MiMoEngine(api_key=api_key, base_url=config.mimo_base_url)
 
 

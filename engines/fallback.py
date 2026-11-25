@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
+from core.local_diagnostics import record_failure
 from engines.base import TranscriptionResult, UnsupportedFormatError
 from exceptions import explicit_cause_types
 
@@ -65,7 +66,8 @@ class FallbackEngine:
             return self._engage_fallback(audio_path, language, initial_prompt)
         except Exception as e:
             self._note_primary_failure(e)
-            logger.warning(f"主引擎失败({e})，回退到备用引擎: {audio_path}")
+            logger.warning("主引擎失败(%s)，回退到备用引擎", type(e).__name__)
+            record_failure("engine_fallback", e)
             return self._engage_fallback(audio_path, language, initial_prompt)
 
     def drain_engine_events(self) -> List[Dict[str, Any]]:

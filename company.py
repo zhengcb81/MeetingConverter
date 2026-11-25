@@ -42,9 +42,15 @@ _FALLBACK = {
 
 def _load_yaml() -> dict:
     """从 companies.yaml 加载公司数据"""
-    if os.path.exists(COMPANIES_FILE):
-        with open(COMPANIES_FILE, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+    return load_company_catalog(COMPANIES_FILE)
+
+
+def load_company_catalog(path) -> dict:
+    """Read company entries, including YAML's empty mapping values."""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as stream:
+            items = yaml.safe_load(stream) or {}
+        return {name: {} if info is None else info for name, info in items.items()}
     return {}
 
 

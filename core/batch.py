@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from core.formatter import fmt_ts
+from core.local_diagnostics import record_failure
 from core.pipeline import transcribe_one
 
 logger = logging.getLogger(__name__)
@@ -126,10 +127,8 @@ def run_batch(
             else:
                 skipped += 1
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            logger.error(f"错误: {af.name} - {e}")
+            record_failure("batch", e)
+            logger.error("错误: %s - %s", af.name, type(e).__name__)
             failures += 1
 
     # 输出统计

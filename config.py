@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, fields
 from typing import Any, Mapping, Optional, Union
@@ -56,6 +57,25 @@ class Config:
         _validate(settings)
         return settings
 
+    def validate_transcription(self) -> None:
+        """Check settings consumed regardless of the selected engine."""
+        _validate_nonnegative_number("paragraph_merge_gap_sec", self.paragraph_merge_gap_sec)
+        _validate_integer("paragraph_max_chars", self.paragraph_max_chars, minimum=100)
+
+    def validate_translation(self) -> None:
+        """Check translation settings only when translation is configured for use."""
+        if self.deepseek_api_key == "YOUR_API_KEY_HERE":
+            raise ConfigError("deepseek_api_key 未配置（仍为默认占位符）")
+        _validate_url("deepseek_base_url", self.deepseek_base_url)
+        _validate_integer("translate_batch_size", self.translate_batch_size, minimum=1)
+        _validate_integer("translate_max_retries", self.translate_max_retries, minimum=0)
+        _validate_integer("translate_api_timeout", self.translate_api_timeout, minimum=1)
+        _validate_nonnegative_number("translate_paragraph_delay", self.translate_paragraph_delay)
+
+    def validate_mimo(self) -> None:
+        """Check the endpoint when a MiMo engine is selected."""
+        _validate_url("mimo_base_url", self.mimo_base_url)
+
 
 def load_config(config_path: Optional[str] = None) -> dict:
     """读取原始配置，显式路径优先，其次是项目自有 config.json。"""
@@ -68,9 +88,11 @@ def load_config(config_path: Optional[str] = None) -> dict:
 
 
 def normalize_config(values: Optional[Union[Config, Mapping[str, Any]]] = None) -> Config:
-    """应用本仓缺省值，并复用已解析的运行配置。"""
+    """应用本仓缺省值。各调用入口校验自己使用的配置。"""
     if isinstance(values, Config):
         return values
+    if values is not None and not isinstance(values, Mapping):
+        raise ConfigError("配置必须是 JSON 对象")
     return Config.from_dict(values or {})
 
 
@@ -85,29 +107,25 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
 
 def _validate(config: Config) -> None:
-    if config.deepseek_api_key == "YOUR_API_KEY_HERE":
-        raise ConfigError("deepseek_api_key 未配置（仍为默认占位符）")
+    config.validate_transcription()
+    config.validate_translation()
+    config.validate_mimo()
 
-    base_url = config.deepseek_base_url
-    if base_url and not base_url.startswith(("http://", "https://")):
-        raise ConfigError(f"deepseek_base_url 格式无效: {base_url}")
 
-    mimo_url = config.mimo_base_url
-    if mimo_url and not mimo_url.startswith(("http://", "https://")):
-        raise ConfigError(f"mimo_base_url 格式无效: {mimo_url}")
+def _validate_url(name: str, value: Any) -> None:
+    if not isinstance(value, str) or not value.startswith(("http://", "https://")):
+        raise ConfigError(f"{name} 格式无效")
 
-    merge_gap = config.paragraph_merge_gap_sec
-    if not isinstance(merge_gap, (int, float)) or merge_gap < 0:
-        raise ConfigError(f"paragraph_merge_gap_sec 必须为非负数: {merge_gap}")
 
-    max_chars = config.paragraph_max_chars
-    if not isinstance(max_chars, int) or max_chars < 100:
-        raise ConfigError(f"paragraph_max_chars 必须 >= 100: {max_chars}")
+def _validate_integer(name: str, value: Any, *, minimum: int) -> None:
+    if type(value) is not int or value < minimum:
+        raise ConfigError(f"{name} 必须为整数且 >= {minimum}")
 
-    batch_size = config.translate_batch_size
-    if not isinstance(batch_size, int) or batch_size < 1:
-        raise ConfigError(f"translate_batch_size 必须 >= 1: {batch_size}")
 
-    retries = config.translate_max_retries
-    if not isinstance(retries, int) or retries < 0:
-        raise ConfigError(f"translate_max_retries 必须 >= 0: {retries}")
+def _validate_nonnegative_number(name: str, value: Any) -> None:
+    if (
+        type(value) not in (int, float)
+        or (isinstance(value, float) and not math.isfinite(value))
+        or value < 0
+    ):
+        raise ConfigError(f"{name} 必须为有限的非负数")

@@ -22,14 +22,13 @@ from pathlib import Path
 
 import yaml
 
+from company import load_company_catalog
+
 COMPANIES_FILE = os.path.join(os.path.dirname(__file__) or ".", "companies.yaml")
 
 
 def load_companies() -> dict:
-    if not os.path.exists(COMPANIES_FILE):
-        return {}
-    with open(COMPANIES_FILE, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    return load_company_catalog(COMPANIES_FILE)
 
 
 def save_companies(data: dict):
@@ -85,6 +84,7 @@ def cmd_add(args):
         entry["products"] = [p.strip() for p in args.products.split(",")]
     if args.notes:
         entry["notes"] = args.notes
+    _set_research_context(entry, args)
     entry["corrections"] = {}
     data[args.name] = entry
     save_companies(data)
@@ -109,8 +109,18 @@ def cmd_update(args):
         entry["products"] = [p.strip() for p in args.products.split(",")]
     if args.notes:
         entry["notes"] = args.notes
+    _set_research_context(entry, args)
     save_companies(data)
     print(f"已更新: {args.name}")
+
+
+def _set_research_context(entry, args) -> None:
+    position = getattr(args, "position", None)
+    if position is not None:
+        entry["position"] = position.strip()
+    sectors = getattr(args, "sectors", None)
+    if sectors is not None:
+        entry["sectors"] = [label.strip() for label in sectors.split(",") if label.strip()]
 
 
 def cmd_correct(args):
@@ -195,6 +205,8 @@ def main():
     p_add.add_argument("--aliases", help="别名(逗号分隔)")
     p_add.add_argument("--products", help="产品(逗号分隔)")
     p_add.add_argument("--notes", help="注意事项")
+    p_add.add_argument("--position", help="公司定位")
+    p_add.add_argument("--sectors", help="板块标签(逗号分隔)")
 
     # update
     p_upd = sub.add_parser("update", help="更新公司信息")
@@ -205,6 +217,8 @@ def main():
     p_upd.add_argument("--aliases")
     p_upd.add_argument("--products")
     p_upd.add_argument("--notes")
+    p_upd.add_argument("--position")
+    p_upd.add_argument("--sectors")
 
     # correct
     p_corr = sub.add_parser("correct", help="管理纠正规则")

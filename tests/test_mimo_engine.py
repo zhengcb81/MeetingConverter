@@ -152,3 +152,14 @@ class TestTranscribe:
         assert "第一段" in result.segments[0].text
         assert "第二段" in "".join(s.text for s in result.segments)
         assert eng._call_api.call_count == 2
+
+    def test_chunked_transcription_preserves_original_with_generated_name(self, mocker, tmp_path):
+        audio = tmp_path / "mimo_chunk_original.mp3"
+        audio.write_bytes(b"synthetic source")
+        eng = MiMoEngine(api_key="synthetic-key")
+        mocker.patch("engines.mimo.estimate_base64_size_mb", return_value=12.0)
+        mocker.patch("engines.mimo.split_by_silence", return_value=[(audio, 0.0, 0.5)])
+        mocker.patch("engines.mimo.get_audio_duration", return_value=0.5)
+        mocker.patch.object(eng, "_call_api", return_value="转写结果。")
+        assert eng.transcribe(str(audio)).segments[0].text == "转写结果。"
+        assert audio.read_bytes() == b"synthetic source"
