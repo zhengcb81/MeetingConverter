@@ -65,4 +65,6 @@ def test_feedback_flush_propagates_keyboard_interrupt_and_logs_io_error(tmp_path
     with caplog.at_level(logging.WARNING, logger="core.feedback"):
         op.flush()
 
-    assert any("feedback_write_failed" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records)
+    report, = [record for record in caplog.records if hasattr(record, "mc_feedback_failure")]
+    assert report.mc_feedback_failure["error_type"] == "OSError"
+    assert report.exc_info is None and "disk full" not in report.getMessage()

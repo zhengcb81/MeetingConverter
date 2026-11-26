@@ -22,6 +22,15 @@ class EngineError(MeetingConverterError):
     """转写引擎相关错误（API 调用失败、格式不支持等）。"""
 
 
+class AudioProcessError(EngineError):
+    """A known FFmpeg subprocess exit, with its operation and original code."""
+
+    def __init__(self, message: str, stage: str, returncode: int) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.returncode = returncode
+
+
 class ConfigError(MeetingConverterError):
     """配置相关错误（缺失必需配置、格式无效等）。"""
 

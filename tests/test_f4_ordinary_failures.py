@@ -242,9 +242,13 @@ def test_native_diagnostic_log_rotates_without_changing_parser_exit(f4_root):
     assert result["exit"] == 2
     assert b"unrecognized arguments" in result["stderr"]
     assert log_path.with_suffix(".jsonl.1").read_bytes() == previous
-    error, = _read_jsonl(log_path)
+    rows = _read_jsonl(log_path)
+    error, = [row for row in rows if row["phase"] == "error"]
     assert error["stage"] == "parsing"
     assert error["error_type"] == "SystemExit"
+    command = [row for row in rows if row["stage"] == "command"]
+    assert [row["phase"] for row in command] == ["started", "exited"]
+    assert command[0]["step_id"] == command[1]["step_id"]
 
 
 def test_unavailable_stderr_never_routes_local_logging_notice_to_stdout(tmp_path, monkeypatch, capsys):

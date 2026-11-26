@@ -22,6 +22,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import traceback
 import urllib.error
 from io import BytesIO
@@ -411,6 +412,73 @@ def _cold_reconcile(root: Path, row: dict) -> dict:
 
 
 class TestRealEntryDiagnostics:
+    def test_hard_stop_leaves_received_headers_linked_to_the_original_operation(self, tmp_path):
+        (tmp_path / "audio.wav").write_bytes(b"stub audio for mimo transport")
+        command = [sys.executable, "-B", str(RUNNER), "--child", str(REPO), str(tmp_path), "mimo-pause-body"]
+        with subprocess.Popen(command, cwd=tmp_path, env=_child_env(tmp_path), stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL) as child:
+            try:
+                deadline = time.monotonic() + 12
+                while not (tmp_path / "reading-body").exists() and child.poll() is None:
+                    assert time.monotonic() < deadline, "provider body read was never reached"
+                    time.sleep(0.02)
+                assert (tmp_path / "reading-body").exists()
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+        rows = _operation_rows(tmp_path)
+        original = _one_check(rows, "action-started")
+        log = _read_jsonl(tmp_path / "logs" / "transcribe.jsonl")
+        seen = [event for event in log if event.get("step_id") == original["step_id"]]
+        headers, = [row for row in seen if row.get("phase") == "response_headers"]
+        assert headers["run_id"] == original["run_id"] and headers["attempt_id"] == original["attempt_id"]
+        assert headers["http_status"] == 200
+        assert all(row["phase"] != "completed" for row in seen)
+        first, second = (_cold_reconcile(tmp_path, original) for _ in range(2))
+        assert first == second
+        assert first["result"]["cost_state"] == "unknown"
+        assert len(_transport_calls(tmp_path)) == 1
+
+    @pytest.mark.parametrize(("scenario", "cause"), [
+        ("mimo-truncated", "IncompleteRead"),
+        ("mimo-stalled-body", "TimeoutError"),
+    ])
+    def test_received_headers_prevent_repeated_post(self, tmp_path, scenario, cause):
+        root = tmp_path / scenario
+        root.mkdir()
+        (root / "audio.wav").write_bytes(b"stub audio for mimo transport")
+        result = _run_child(root, scenario)
+        assert result["exit"] == 1
+        calls = _transport_calls(root)
+        assert [(item["method"], item["http_status"]) for item in calls] == [("POST", 200)]
+        assert not (root / "out" / "audio_原文.txt").exists()
+        rows = _operation_rows(root)
+        assert _one_check(rows, "publication-outcome")["actual"] == "transcription_failed"
+        assert _one_check(rows, "cost-receipt")["actual"] == "cost_unknown"
+        assert _finished_details(root)["errors"][0]["cause_types"] == [cause]
+        original = _one_check(rows, "action-started")
+        trace = _read_jsonl(root / "logs" / "transcribe.jsonl")
+        phases = {(record["stage"], record["phase"]) for record in trace
+                  if record.get("step_id") == original["step_id"]}
+        assert {("file", "started"), ("mimo_request", "dispatch_started"),
+                ("mimo_request", "response_headers"), ("file", "error")} <= phases
+        first, second = (_cold_reconcile(root, original) for _ in range(2))
+        assert first == second and first["result"]["cost_state"] == "unknown"
+        assert _transport_calls(root) == calls
+        _assert_no_secret(result["stdout"] + result["stderr"])
+
+    def test_public_event_port_preserves_degraded_result(self, tmp_path):
+        root = tmp_path / "structural-engine"
+        root.mkdir()
+        (root / "audio.wav").write_bytes(b"stub audio for structural engine")
+        assert _run_child(root, "public-fallback-events")["exit"] == 0
+        rows = _operation_rows(root)
+        assert _one_check(rows, "publication-outcome")["actual"] == "published_degraded"
+        details = _finished_details(root)
+        assert details["engine"]["fallback_engaged"] is True
+        assert details["engine"]["primary_error"]["error_type"] == "TimeoutError"
+
     def test_retry_then_success_keeps_artifact_and_sanitized_observation(self, tmp_path):
         root = tmp_path / "retry-success"
         root.mkdir()

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import sys
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from functools import lru_cache, wraps
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from core.feedback import (
+    ADAPTER_VERSION,
     FEEDBACK_DIR_ENV,
     FEEDBACK_OUT_ENV,
     FEEDBACK_STATE_ROOT_ENV,
@@ -21,10 +26,15 @@ from core.feedback import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
+_IMPLEMENTATION_FILES = (
+    "core/feedback.py", "core/local_diagnostics.py", "core/pipeline.py", "core/provider_exchange.py",
+    "engines/mimo.py", "transcribe.py", "translator.py",
+)
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.propagate = False
-_LOGGER.setLevel(logging.WARNING)
+_LOGGER.setLevel(logging.INFO)
 _ROTATE_BYTES = 1024 * 1024
+_STEP: ContextVar[tuple[str, str] | None] = ContextVar("meeting_step", default=None)
 
 
 def _stderr_notice(code: str, error_type: str) -> None:
@@ -45,14 +55,29 @@ class _DiagnosticFormat(logging.Formatter):
         super().__init__()
         self.run_id = run_id
         self.attempt_id = attempt_id
+        self.implementation_sha256 = _implementation_sha256()
 
     def format(self, record: logging.LogRecord) -> str:
         return json.dumps({
-            "timestamp": self.formatTime(record),
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
             "run_id": self.run_id,
             "attempt_id": self.attempt_id,
+            "implementation": ADAPTER_VERSION,
+            "projection_version": ADAPTER_VERSION,
+            "implementation_sha256": self.implementation_sha256,
             **record.mc_diagnostic,
         }, ensure_ascii=True)
+
+
+@lru_cache(maxsize=1)
+def _implementation_sha256() -> str | None:
+    """Fingerprint the source files that define this runtime's recorded behavior."""
+    try:
+        sources = {name: hashlib.sha256((_ROOT / name).read_bytes()).hexdigest() for name in _IMPLEMENTATION_FILES}
+    except OSError:
+        return None
+    content = json.dumps(sources, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(content).hexdigest()
 
 
 def _log_directory() -> Path:
@@ -68,7 +93,7 @@ def _log_directory() -> Path:
 
 @contextmanager
 def cli_diagnostics(name: str):
-    """Attach a rotating file only to the CLI failure stream."""
+    """Attach the owner journal before processing the command."""
     try:
         directory = feedback_io_path(_log_directory())
         directory.mkdir(parents=True, exist_ok=True)
@@ -91,7 +116,50 @@ def cli_diagnostics(name: str):
             handler.close()
 
 
-def record_failure(stage: str, error: BaseException) -> None:
+@contextmanager
+def operation_scope(step_id: str, input_id: str):
+    token = _STEP.set((step_id, input_id))
+    try:
+        yield
+    finally:
+        _STEP.reset(token)
+
+
+def _step_fields() -> dict:
+    active = _STEP.get()
+    return {} if active is None else {"step_id": active[0], "input_id": active[1]}
+
+
+def record_event(stage: str, phase: str, **facts) -> None:
+    """Write caller-owned status and input references without raw content."""
+    if _LOGGER.handlers:
+        fields = {**_step_fields(), **facts, "stage": stage, "phase": phase}
+        _LOGGER.info("lifecycle", extra={"mc_diagnostic": fields})
+
+
+def diagnosed_command(name: str):
+    """Record the existing auxiliary entry point without changing its exit semantics."""
+    def decorate(function):
+        @wraps(function)
+        def run(*args, **kwargs):
+            with cli_diagnostics(name):
+                record_event("command", "started")
+                try:
+                    result = function(*args, **kwargs)
+                except SystemExit as exc:
+                    record_event("command", "exited", exit_code=exc.code if type(exc.code) is int else None)
+                    raise
+                except Exception as exc:
+                    record_failure("command", exc)
+                    raise
+                else:
+                    record_event("command", "exited", exit_code=result if type(result) is int else 0)
+                    return result
+        return run
+    return decorate
+
+
+def record_failure(stage: str, error: BaseException, **facts) -> None:
     """Retain cause types and the innermost owner frame without exception text."""
     if not _LOGGER.handlers:
         return
@@ -106,5 +174,6 @@ def record_failure(stage: str, error: BaseException) -> None:
             location = f"{relative.as_posix()}:{frame.tb_lineno}"
         frame = frame.tb_next
     _LOGGER.warning("failure", extra={
-        "mc_diagnostic": {"stage": stage, **describe_error(error, location)}
+        "mc_diagnostic": {**_step_fields(), **facts, "stage": stage, "phase": "error",
+                          **describe_error(error, location)}
     })

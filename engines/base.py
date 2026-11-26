@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Any, List, Mapping, Optional, Protocol, runtime_checkable
 
 
 @dataclass
@@ -40,3 +40,10 @@ class TranscriptionEngine(Protocol):
         language: Optional[str] = None,
         initial_prompt: Optional[str] = None,
     ) -> TranscriptionResult: ...
+
+
+@runtime_checkable
+class EngineEventSource(Protocol):
+    """An optional public source of transcription fallback facts."""
+
+    def drain_engine_events(self) -> list[Mapping[str, Any]]: ...

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from config import load_config
+from core.local_diagnostics import diagnosed_command, record_failure
 from engines.factory import create_engine
 
 
@@ -31,7 +32,8 @@ def compare_engines(audio_path: str, language: str = None):
         print(f"  语言: {mimo_result.language}")
         print(f"  文本长度: {len(mimo_text)} 字符")
     except Exception as e:
-        print(f"  错误: {e}")
+        record_failure("compare_mimo", e)
+        print(f"  错误: {type(e).__name__}")
         mimo_text = None
         mimo_time = 0
 
@@ -48,7 +50,8 @@ def compare_engines(audio_path: str, language: str = None):
         print(f"  语言: {whisper_result.language}")
         print(f"  文本长度: {len(whisper_text)} 字符")
     except Exception as e:
-        print(f"  错误: {e}")
+        record_failure("compare_whisper", e)
+        print(f"  错误: {type(e).__name__}")
         whisper_text = None
         whisper_time = 0
 
@@ -58,10 +61,6 @@ def compare_engines(audio_path: str, language: str = None):
     print(f"{'='*60}")
 
     if mimo_text and whisper_text:
-        # 计算相似度（简单比较）
-        mimo_lines = mimo_text.split("。")
-        whisper_lines = whisper_text.split("。")
-
         print(f"\nMiMo 段落数: {len(mimo_result.segments)}")
         print(f"Whisper 段落数: {len(whisper_result.segments)}")
         print(f"\nMiMo 耗时: {mimo_time:.1f}秒")
@@ -88,7 +87,7 @@ def compare_engines(audio_path: str, language: str = None):
         with open(output_dir / f"{stem}_whisper.txt", "w", encoding="utf-8") as f:
             f.write(whisper_text)
 
-        print(f"\n完整结果已保存到 comparison/ 目录")
+        print("\n完整结果已保存到 comparison/ 目录")
 
     elif mimo_text:
         print("\n仅 MiMo 转写成功")
@@ -98,7 +97,8 @@ def compare_engines(audio_path: str, language: str = None):
         print("\n两个引擎都失败了")
 
 
-if __name__ == "__main__":
+@diagnosed_command("compare-engines")
+def main():
     if len(sys.argv) < 2:
         print("用法: python compare_engines.py <音频文件> [语言]")
         sys.exit(1)
@@ -106,3 +106,7 @@ if __name__ == "__main__":
     audio_file = sys.argv[1]
     lang = sys.argv[2] if len(sys.argv) > 2 else None
     compare_engines(audio_file, lang)
+
+
+if __name__ == "__main__":
+    main()

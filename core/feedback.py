@@ -86,7 +86,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.output import WrittenOutput
-from exceptions import explicit_cause_types
+from exceptions import AudioProcessError, explicit_cause_types
 
 logger = logging.getLogger(__name__)
 
@@ -311,11 +311,14 @@ def _exception_cause_chain(error: BaseException) -> List[str]:
 
 def describe_error(error: BaseException, location: str) -> Dict[str, Any]:
     """一条脱敏异常记录：类别、脱敏因果链与本仓相对代码位置。"""
-    return {
+    facts = {
         "error_type": type(error).__name__,
         "cause_types": _exception_cause_chain(error),
         "location": location,
     }
+    if isinstance(error, AudioProcessError):
+        facts.update(process="ffmpeg", process_step=error.stage, process_exit=error.returncode)
+    return facts
 
 
 class FeedbackRecorder:
@@ -819,7 +822,7 @@ class OperationFeedback:
     ) -> None:
         self._recorder = recorder
         self.input_id = input_id
-        self.step_id = f"meeting-operation/{input_id}/{uuid.uuid4().hex}" if recorder else ""
+        self.step_id = f"meeting-operation/{input_id}/{uuid.uuid4().hex}"
         self.requested_mode = requested_mode
         self.force = bool(force)
         # 翻译意图由调用边界显式传入：不从翻译器对象缺席推导用户主动关闭。
@@ -1093,7 +1096,8 @@ class OperationFeedback:
                 self._recorder.record(**entry)
             except Exception as exc:  # 旁路的常规异常不替换业务结果，但保留中断信号并记日志
                 reason = f"feedback_write_failed:{type(exc).__name__}"
-                logger.warning("%s", reason, exc_info=True)
+                facts = describe_error(exc, "core/feedback.py#OperationFeedback.flush")
+                logger.warning("%s diagnostic=%s", reason, facts, extra={"mc_feedback_failure": facts})
                 self._recorder.note_failure(reason)
 
     # ── 内部 ──────────────────────────────────────────────────────
@@ -1344,12 +1348,10 @@ def begin_operation(
         logger.warning(f"反馈旁路不可用（不影响本次转录结果）: {type(exc).__name__}")
         recorder = None
     mode = MODE_TRANSLATED if translate_requested else MODE_ORIGINAL_ONLY
-    input_id = ""
-    if recorder is not None:
-        try:
-            input_id = input_identity(audio_path)
-        except Exception:
-            input_id = hashlib.sha256(str(audio_path).encode("utf-8", "replace")).hexdigest()[:12]
+    try:
+        input_id = input_identity(audio_path)
+    except Exception:
+        input_id = hashlib.sha256(str(audio_path).encode("utf-8", "replace")).hexdigest()[:12]
     return OperationFeedback(
         recorder,
         input_id=input_id,
@@ -1374,12 +1376,11 @@ class StartupFeedback:
     def __init__(self, recorder: Optional[FeedbackRecorder]) -> None:
         self._recorder = recorder
         self._finished = False
-        if recorder is None:
-            self._step_id = ""
-            self._evidence_ref = ""
-            return
         hex_part = uuid.uuid4().hex[:12]
         self._step_id = f"mc-startup/{hex_part}"
+        if recorder is None:
+            self._evidence_ref = ""
+            return
         self._evidence_ref = f"mc-startup/{hex_part}"
         recorder.record(
             step_id=self._step_id,

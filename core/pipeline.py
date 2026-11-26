@@ -16,10 +16,9 @@ from core.feedback import (
     begin_operation,
 )
 from core.formatter import fmt_ts
-from core.local_diagnostics import record_failure
+from core.local_diagnostics import operation_scope, record_event, record_failure
 from core.output import write_bilingual, write_original, write_translated
-from engines.base import Segment
-from engines.fallback import FallbackEngine
+from engines.base import EngineEventSource, Segment
 from exceptions import TranslationError
 from metrics import Timer, TranscribeMetrics
 
@@ -150,6 +149,8 @@ def transcribe_one(
         force=force,
     )
     feedback.start()
+    identity = {"step_id": feedback.step_id, "input_id": feedback.input_id}
+    record_event("file", "started", **identity)
 
     if not force and original_file.exists():
         logger.info(f"跳过 (已完成): {audio_path.name}")
@@ -157,6 +158,7 @@ def transcribe_one(
         feedback.note_reuse(translated_file, bilingual_file)
         feedback.finish()
         feedback.flush()
+        record_event("file", "reused", **identity)
         return None
 
     logger.info(f"\n{'=' * 60}")
@@ -173,9 +175,12 @@ def transcribe_one(
                 with stt_timer:
                     feedback.set_stage(STAGE_TRANSCRIPTION)
                     feedback.note_engine_started()
-                    result = engine.transcribe(
-                        str(audio_path), language=language, initial_prompt=initial_prompt
-                    )
+                    with operation_scope(feedback.step_id, feedback.input_id):
+                        record_event("transcription", "invoking")
+                        result = engine.transcribe(
+                            str(audio_path), language=language, initial_prompt=initial_prompt,
+                        )
+                        record_event("transcription", "completed")
                     lang, lang_prob, duration = (
                         result.language,
                         result.language_probability,
@@ -214,25 +219,29 @@ def transcribe_one(
                     f"公司: {company_context.split(chr(10))[0] if company_context else '无'})"
                 )
                 feedback.set_stage(STAGE_TRANSLATION)
+                record_event("translation", "invoking", **identity)
                 trans_timer = Timer()
                 try:
                     with trans_timer:
                         try:
-                            translations = translator_obj.translate_paragraphs(
-                                [para.text for para in paragraphs],
-                                company_context=company_context,
-                                corrections=corrections,
-                                progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
-                            )
+                            with operation_scope(feedback.step_id, feedback.input_id):
+                                translations = translator_obj.translate_paragraphs(
+                                    [para.text for para in paragraphs],
+                                    company_context=company_context,
+                                    corrections=corrections,
+                                    progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
+                                )
                         except TranslationError as e:
                             logger.warning("翻译失败，跳过翻译文件: %s", type(e).__name__)
-                            record_failure("translation", e)
+                            with operation_scope(feedback.step_id, feedback.input_id):
+                                record_failure("translation", e)
                             feedback.note_error(e)
                             translations = None
                             translation_failed = True
                 finally:
                     metrics.translate_elapsed = trans_timer.elapsed
                 if translations is not None:
+                    record_event("translation", "completed", **identity)
                     logger.info(f"翻译完成: {trans_timer.elapsed:.1f}秒")
 
             # 输出
@@ -250,6 +259,7 @@ def transcribe_one(
             try:
                 with output_timer:
                     feedback.set_stage(STAGE_OUTPUT)
+                    record_event("output", "writing", **identity)
                     orig = output_dir / f"{stem}_原文.txt"
                     try:
                         witness = write_original(orig, paragraphs, meta, timestamps, receipt=feedback.enabled)
@@ -259,6 +269,7 @@ def transcribe_one(
                         feedback.note_writer_failed(ROLE_ORIGINAL, orig, exc)
                         raise
                     feedback.note_writer_committed(ROLE_ORIGINAL, witness)
+                    record_event("output", "committed", role=ROLE_ORIGINAL, **identity)
                     logger.info(f"  原文: {orig}")
 
                     if translations is None:
@@ -284,6 +295,7 @@ def transcribe_one(
                             feedback.note_writer_failed(ROLE_TRANSLATED, tr, exc)
                             raise
                         feedback.note_writer_committed(ROLE_TRANSLATED, witness)
+                        record_event("output", "committed", role=ROLE_TRANSLATED, **identity)
                         logger.info(f"  翻译: {tr}")
 
                         bi = output_dir / f"{stem}_中英对照.txt"
@@ -293,6 +305,7 @@ def transcribe_one(
                             feedback.note_writer_failed(ROLE_BILINGUAL, bi, exc)
                             raise
                         feedback.note_writer_committed(ROLE_BILINGUAL, witness)
+                        record_event("output", "committed", role=ROLE_BILINGUAL, **identity)
                         logger.info(f"  对照: {bi}")
             finally:
                 # writer 抛错时输出耗时照样记账：失败路径的步骤日志因此仍然
@@ -302,6 +315,7 @@ def transcribe_one(
         metrics.total_elapsed = total_timer.elapsed
         logger.info(f"性能: {metrics.summary()}")
         feedback.finish(_metric_snapshot(metrics))
+        record_event("file", "completed", **identity)
     except Exception as exc:
         # 异常终态是可知的：按阶段给出失败原因。
         metrics.total_elapsed = total_timer.elapsed
@@ -309,6 +323,8 @@ def transcribe_one(
         feedback.note_abort()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))
+        with operation_scope(feedback.step_id, feedback.input_id):
+            record_failure("file", exc)
         raise
     except BaseException as exc:
         # 被中止：没有可信终态，终态保留 unknown。
@@ -317,6 +333,7 @@ def transcribe_one(
         feedback.mark_unknown()
         feedback.note_error(exc)
         feedback.finish(_metric_snapshot(metrics))
+        record_event("file", "unconfirmed", **identity)
         raise
     finally:
         # 此刻没有任何计时器打开：旁路自身的写入耗时不进任何被发布的字段，
@@ -338,15 +355,13 @@ def transcribe_one(
 
 
 def _drain_engine_events(engine, feedback) -> None:
-    """取走引擎包装层（FallbackEngine）的降级事件，交给反馈投影。
-
-    只有真实的 FallbackEngine 才有事件流：测试替身与其他引擎一律跳过。
-    """
-    if not isinstance(engine, FallbackEngine):
+    """把任意实现引擎公开事件协议的降级事实交给反馈投影。"""
+    if not isinstance(engine, EngineEventSource):
         return
     try:
         events = engine.drain_engine_events()
-    except Exception:
+    except Exception as exc:
+        record_failure("engine_event_projection", exc)
         return
     if events:
         feedback.note_engine_events(events)

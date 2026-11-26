@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from exceptions import EngineError
+from exceptions import AudioProcessError, EngineError
 
 MIMO_SUPPORTED = {"wav", "mp3"}
 MAX_BASE64_MB = 4.0
@@ -120,7 +120,7 @@ def split_by_silence(
         capture_output=True,
     )
     if detect.returncode:
-        raise EngineError(f"ffmpeg 静音检测失败 (exit={detect.returncode})")
+        raise AudioProcessError(f"ffmpeg 静音检测失败 (exit={detect.returncode})", "silence_detect", detect.returncode)
     silence_starts = _parse_silence_starts(detect.stderr.decode("utf-8", errors="replace"))
 
     if not silence_starts:
@@ -157,7 +157,7 @@ def split_by_silence(
                 capture_output=True,
             )
             if cut.returncode:
-                raise EngineError(f"ffmpeg 切片失败 (exit={cut.returncode})")
+                raise AudioProcessError(f"ffmpeg 切片失败 (exit={cut.returncode})", "segment", cut.returncode)
             if not tmp.stat().st_size:
                 raise EngineError("ffmpeg 切片为空")
         complete = True

@@ -33,7 +33,7 @@ from core.feedback import (
     begin_startup,
 )
 from core.formatter import fmt_ts
-from core.local_diagnostics import cli_diagnostics, record_failure
+from core.local_diagnostics import cli_diagnostics, record_event, record_failure
 from core.pipeline import merge_into_paragraphs, transcribe_one
 from core.output import write_original, write_translated, write_bilingual
 from engines.factory import create_engine
@@ -61,8 +61,19 @@ def main():
     """普通入口：身份先于参数解析建立；启动失败按阶段记录，退出码保持原口径。"""
     with cli_diagnostics("transcribe"):
         startup = begin_startup()
+        record_event("command", "started", step_id=startup.step_id)
         try:
-            return _run(startup)
+            result = _run(startup)
+        except SystemExit as exc:
+            record_event("command", "exited", step_id=startup.step_id,
+                         exit_code=exc.code if type(exc.code) is int else None)
+            raise
+        except Exception as exc:
+            record_failure("command", exc)
+            raise
+        else:
+            record_event("command", "exited", step_id=startup.step_id, exit_code=result)
+            return result
         finally:
             startup.finalize()
 

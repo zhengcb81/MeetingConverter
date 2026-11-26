@@ -9,13 +9,12 @@ import json
 import logging
 import re
 import time
-import urllib.error
 import urllib.request
 from typing import Any, Mapping, Union
 
 from config import Config, normalize_config
 from config import load_config as load_config
-from core.local_diagnostics import record_failure
+from core.provider_exchange import ProviderExchange
 from exceptions import TranslationError
 
 logger = logging.getLogger(__name__)
@@ -81,13 +80,14 @@ class Translator:
 
         max_attempts = max(1, self.max_retries)
         for attempt in range(max_attempts):
+            exchange = ProviderExchange("translate_request", attempt + 1)
             try:
-                raw = self._call_api(text, company_context)
+                raw = self._call_api(text, company_context, exchange=exchange)
                 cleaned = self._clean_output(raw)
                 return apply_corrections(cleaned, corrections)
             except Exception as e:
-                record_failure("translate_request", e)
-                if attempt < max_attempts - 1:
+                exchange.record_failure(e)
+                if exchange.may_retry and attempt < max_attempts - 1:
                     wait = 2 ** (attempt + 1)
                     logger.warning(
                         "  翻译重试 %d/%d (%ds): %s",
@@ -96,7 +96,7 @@ class Translator:
                     time.sleep(wait)
                 else:
                     logger.error("  翻译失败: %s", type(e).__name__)
-                    raise TranslationError(f"翻译失败（{max_attempts}次尝试后）") from e
+                    raise TranslationError(f"翻译失败（{attempt + 1}次尝试后）") from e
 
     @staticmethod
     def _clean_output(text: str) -> str:
@@ -117,7 +117,7 @@ class Translator:
                 time.sleep(self.paragraph_delay)
         return results
 
-    def _call_api(self, text: str, company_context: str = "") -> str:
+    def _call_api(self, text: str, company_context: str = "", *, exchange: ProviderExchange | None = None) -> str:
         url = f"{self.base_url}/v1/chat/completions"
         user_content = "请翻译以下内容为中文，并审校纠正不合理之处。\n\n"
         if company_context:
@@ -143,6 +143,6 @@ class Translator:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=self.api_timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result["choices"][0]["message"]["content"].strip()
+        exchange = exchange if exchange is not None else ProviderExchange("translate_request", 1)
+        result = exchange.read_json(urllib.request.urlopen, req, timeout=self.api_timeout)
+        return result["choices"][0]["message"]["content"].strip()

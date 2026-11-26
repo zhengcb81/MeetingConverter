@@ -11,7 +11,6 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional
 
@@ -24,7 +23,7 @@ from audio_utils import (
     split_by_silence,
 )
 from config import DEFAULT_MIMO_URL as MIMO_API_URL
-from core.local_diagnostics import record_failure
+from core.provider_exchange import ProviderExchange
 from engines.base import TranscriptionResult, UnsupportedFormatError
 from exceptions import MAX_CAUSE_TYPES, EngineError
 from text_merger import merge_text_into_paragraphs
@@ -33,15 +32,6 @@ logger = logging.getLogger(__name__)
 
 MIMO_MODEL = "mimo-v2.5-asr"
 MIME_MAP = {"wav": "audio/wav", "mp3": "audio/mpeg"}
-
-
-def _http_status(error: BaseException) -> Optional[int]:
-    """从 HTTPError 取状态；其他异常即使带 code/status 也不当作 HTTP 状态。"""
-    if isinstance(error, urllib.error.HTTPError):
-        code = error.code
-        if isinstance(code, int) and 100 <= code <= 599:
-            return code
-    return None
 
 
 def _source_location(error: BaseException) -> str:
@@ -96,10 +86,9 @@ def _cause_chain(error: BaseException) -> List[str]:
     return chain
 
 
-def _diagnostic_fields(error: BaseException, prefix: str) -> str:
+def _diagnostic_fields(error: BaseException, prefix: str, status: Optional[int]) -> str:
     """一次失败的可公开字段：尝试序号、异常类型、HTTP 状态与源码位置。"""
     fields = [prefix, f"error_type={type(error).__name__}"]
-    status = _http_status(error)
     if status is not None:
         fields.append(f"http_status={status}")
     fields.append(f"location={_source_location(error)}")
@@ -193,7 +182,7 @@ class MiMoEngine:
         max_retries = 3
         failure = None
         for attempt in range(max_retries):
-            response_received = False
+            exchange = ProviderExchange("mimo_request", attempt + 1)
             try:
                 payload = self._build_payload(audio_data_url, language)
                 data = json.dumps(payload).encode("utf-8")
@@ -206,22 +195,16 @@ class MiMoEngine:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=300) as resp:
-                    body = resp.read()
-                    response_received = True
-                result = json.loads(body.decode("utf-8"))
+                result = exchange.read_json(urllib.request.urlopen, req, timeout=300)
                 return result["choices"][0]["message"]["content"].strip()
             except Exception as e:
                 # 只投影可公开的字段：供应商正文、请求原文和凭据留在
                 # transport 边界内，不进入重试日志、失败消息或 traceback。
                 diagnostic = _diagnostic_fields(
-                    e, f"attempt={attempt + 1}/{max_retries}"
+                    e, f"attempt={attempt + 1}/{max_retries}", exchange.http_status
                 )
-                record_failure("mimo_request", e)
-                if isinstance(e, urllib.error.HTTPError):
-                    with suppress(OSError):
-                        e.close()
-                if not response_received and attempt < max_retries - 1:
+                exchange.record_failure(e)
+                if exchange.may_retry and attempt < max_retries - 1:
                     wait = 2 ** (attempt + 1)
                     logger.warning(
                         "MiMo API 重试 %d/%d (%ds): %s",
@@ -233,7 +216,7 @@ class MiMoEngine:
                     time.sleep(wait)
                 else:
                     attempts = attempt + 1
-                    failure_text = _diagnostic_fields(e, f"attempts={attempts}")
+                    failure_text = _diagnostic_fields(e, f"attempts={attempts}", exchange.http_status)
                     logger.error(
                         "MiMo API 失败（%d次尝试后）: %s",
                         attempts,
@@ -245,7 +228,7 @@ class MiMoEngine:
                     # 业务层仍拿到原类型 EngineError；归因放在结构化属性上。
                     failure.attempts = attempts
                     failure.error_type = type(e).__name__
-                    failure.http_status = _http_status(e)
+                    failure.http_status = exchange.http_status
                     failure.location = _source_location(e)
                     failure.cause_types = _cause_chain(e)
                     # 跳出 except 后再抛：连 __context__ 也不保留原始异常，

@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import base64
+from http.client import IncompleteRead
 import json
 import os
 import sys
+from threading import Event
 import time
 import urllib.error
 from pathlib import Path
@@ -147,6 +149,21 @@ def _mimo_transport(root: Path, scenario: str):
             record["audio_b64_present"] = encoded == MIMO_AUDIO_B64
         except (AttributeError, KeyError, IndexError, TypeError, ValueError):
             record["audio_b64_present"] = False
+        if scenario in ("mimo-truncated", "mimo-stalled-body", "mimo-pause-body"):
+            class InterruptedBody(_MimoResponse):
+                status = 200
+
+                def read(self):
+                    if scenario == "mimo-truncated":
+                        raise IncompleteRead(MIMO_VENDOR_BODY.encode(), 100)
+                    if scenario == "mimo-pause-body":
+                        (root / "reading-body").touch()
+                        Event().wait(30)
+                    raise TimeoutError(MIMO_VENDOR_BODY)
+
+            record["http_status"] = 200
+            _append(record)
+            return InterruptedBody("")
         if scenario == "mimo-retry-success" and attempt > 1:
             record["ok"] = True
             _append(record)
@@ -187,6 +204,15 @@ def _install(repo: Path, root: Path, scenario: str):
             FailingPrimaryEngine(root, ValueError("fixture-inner")),
             lambda: WorkingEngine(root),
         )
+    elif scenario == "public-fallback-events":
+        class EventEngine(WorkingEngine):
+            def drain_engine_events(self):
+                return [
+                    {"event": "primary_failed", "error_type": "TimeoutError", "cause_types": ["OSError"]},
+                    {"event": "fallback_engaged", "engine": "local-fixture"},
+                ]
+
+        engine = EventEngine(root)
     elif scenario == "fallback-unavailable":
         engine = FallbackEngine(
             FailingPrimaryEngine(root, TimeoutError(110, "fixture-timeout")),
@@ -209,6 +235,9 @@ def _install(repo: Path, root: Path, scenario: str):
         "mimo-retry-success",
         "mimo-retry-exhausted",
         "mimo-fallback-success",
+        "mimo-truncated",
+        "mimo-stalled-body",
+        "mimo-pause-body",
     ):
         # 真实 MiMoEngine + 确定性 transport：不访问网络、不外发音频。
         import engines.mimo as mimo_module
@@ -265,6 +294,9 @@ def main() -> None:
         "mimo-retry-success",
         "mimo-retry-exhausted",
         "mimo-fallback-success",
+        "mimo-truncated",
+        "mimo-stalled-body",
+        "mimo-pause-body",
     ):
         argv.extend(["--engine", "mimo"])
     if scenario == "invalid-cli":

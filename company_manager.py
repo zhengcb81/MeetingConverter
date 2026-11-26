@@ -23,6 +23,7 @@ from pathlib import Path
 import yaml
 
 from company import load_company_catalog
+from core.local_diagnostics import diagnosed_command
 
 COMPANIES_FILE = os.path.join(os.path.dirname(__file__) or ".", "companies.yaml")
 
@@ -185,6 +186,7 @@ def cmd_import_corr(args):
     print(f"已导入 {count} 条纠正规则到 {args.name}")
 
 
+@diagnosed_command("company-manager")
 def main():
     parser = argparse.ArgumentParser(description="公司知识库管理工具")
     sub = parser.add_subparsers(dest="command")

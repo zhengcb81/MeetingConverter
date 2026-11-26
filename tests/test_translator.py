@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from http.client import IncompleteRead
+from io import BytesIO
 from unittest.mock import MagicMock
 
 import pytest
@@ -64,6 +66,19 @@ class TestTranslateParagraphCorrections:
 
 
 class TestTranslateParagraphRetry:
+    def test_incomplete_response_is_not_submitted_again(self, translator, mocker):
+        class InterruptedResponse(BytesIO):
+            def read(self, *_args):
+                raise IncompleteRead(b"isolated provider fixture", 1)
+
+        opener = mocker.patch("translator.urllib.request.urlopen", side_effect=lambda *a, **k: InterruptedResponse())
+        sleep = mocker.patch("translator.time.sleep")
+        with pytest.raises(TranslationError) as caught:
+            translator.translate_paragraph("synthetic text")
+        assert isinstance(caught.value.__cause__, IncompleteRead)
+        opener.assert_called_once()
+        sleep.assert_not_called()
+
     @pytest.mark.parametrize("fail_first", [False, True])
     def test_zero_retries_runs_one_attempt(self, mocker, fail_first):
         from translator import Translator
