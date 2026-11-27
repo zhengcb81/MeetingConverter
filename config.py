@@ -11,6 +11,7 @@ from typing import Any, Mapping, Optional, Union
 from exceptions import ConfigError
 
 DEFAULT_MIMO_URL = "https://api.xiaomimimo.com/v1/chat/completions"
+DEFAULT_FFPROBE_TIMEOUT = 30
 
 
 @dataclass
@@ -43,6 +44,9 @@ class Config:
     translate_api_timeout: int = 120
     translate_paragraph_delay: float = 0.3
 
+    # 本地音频检查
+    ffprobe_timeout: int = DEFAULT_FFPROBE_TIMEOUT
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Config:
         """从字典构造配置，忽略未知键。"""
@@ -73,17 +77,25 @@ class Config:
         _validate_nonnegative_number("translate_paragraph_delay", self.translate_paragraph_delay)
 
     def validate_mimo(self) -> None:
-        """Check the endpoint when a MiMo engine is selected."""
+        """Validate the endpoint and local probe deadline for MiMo."""
         _validate_url("mimo_base_url", self.mimo_base_url)
+        _validate_integer("ffprobe_timeout", self.ffprobe_timeout, minimum=1)
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
     """读取原始配置，显式路径优先，其次是项目自有 config.json。"""
     paths = (config_path, os.path.join(os.path.dirname(__file__) or ".", "config.json"))
     for path in paths:
-        if path and os.path.exists(path):
+        if not path:
+            continue
+        try:
             with open(path, encoding="utf-8") as stream:
-                return json.load(stream)
+                data = json.load(stream)
+        except FileNotFoundError:
+            continue
+        if not isinstance(data, dict):
+            raise ConfigError("配置必须是 JSON 对象")
+        return data
     raise FileNotFoundError("找不到配置文件，请确保项目目录下 config.json 存在")
 
 

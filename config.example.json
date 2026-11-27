@@ -9,6 +9,7 @@
     "_section_mimo": "=== MiMo ASR 配置 ===",
     "mimo_api_key": "YOUR_MIMO_API_KEY_HERE",
     "mimo_base_url": "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    "ffprobe_timeout": 30,
 
     "_section_whisper": "=== Whisper 本地转写配置 ===",
     "whisper_model": "small",

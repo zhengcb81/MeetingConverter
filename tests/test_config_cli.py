@@ -74,7 +74,13 @@ import transcribe
 # both the historical module and the configuration owner it moves to.
 config.__file__ = str(root / "config.py")
 translator.__file__ = str(root / "translator.py")
-engines.mimo.get_audio_duration = lambda _path: 1.0
+probe_timeouts = []
+
+def probe_duration(_path, *, timeout):
+    probe_timeouts.append(timeout)
+    return 1.0
+
+engines.mimo.get_audio_duration = probe_duration
 raw_open = builtins.open
 config_path = root / "config.json"
 open_count = 0
@@ -91,20 +97,20 @@ exit_code = transcribe.main()
 cli_opens = open_count
 builtins.open = raw_open
 typed_endpoint = typed_error = None
-if "--no-translate" not in options:
+if exit_code == 0 and "--no-translate" not in options:
     try:
         typed_endpoint = config.Config.load().mimo_base_url
     except (json.JSONDecodeError, config.ConfigError) as error:
         typed_error = type(error).__name__
 (root / "result.json").write_text(json.dumps({
-    "calls": called, "config_opens": cli_opens,
+    "calls": called, "config_opens": cli_opens, "probe_timeouts": probe_timeouts,
     "typed_endpoint": typed_endpoint, "typed_error": typed_error,
 }), encoding="utf-8")
 raise SystemExit(exit_code)
 """
 
 
-def _run_cli(root: Path, config: Union[dict, str], *options: str) -> dict:
+def _run_cli(root: Path, config: Union[dict, str], *options: str, expected_code=0) -> dict:
     config_text = config if isinstance(config, str) else json.dumps(config)
     (root / "config.json").write_text(config_text, encoding="utf-8")
     (root / "audio.wav").write_bytes(b"synthetic audio bytes")
@@ -116,13 +122,16 @@ def _run_cli(root: Path, config: Union[dict, str], *options: str) -> dict:
     process = subprocess.run(
         [sys.executable, "-B", "-c", CLI_CHILD, str(REPO), str(root), *options],
         cwd=root, env=env, capture_output=True, encoding="utf-8", timeout=20,
+        stdin=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    assert process.returncode == 0, (process.stdout, process.stderr)
+    assert process.returncode == expected_code, (process.stdout, process.stderr)
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
     assert result["config_opens"] == 1
-    original = (root / "out/audio_原文.txt").read_text(encoding="utf-8").strip().splitlines()
-    assert original[0] == "音频文件: audio.wav"
-    assert original[-1] == "Revenue rose during the quarter."
+    if expected_code == 0:
+        original = (root / "out/audio_原文.txt").read_text(encoding="utf-8").strip().splitlines()
+        assert original[0] == "音频文件: audio.wav"
+        assert original[-1] == "Revenue rose during the quarter."
     return result
 
 
@@ -134,7 +143,8 @@ def test_cli_engine_and_typed_load_agree_on_the_same_config(tmp_path, explicit_u
     timeout = 120
     if explicit_url is not None:
         config.update(mimo_base_url=explicit_url, deepseek_base_url="https://translation.invalid",
-                      deepseek_model="fixture-explicit-model", translate_api_timeout=17)
+                      deepseek_model="fixture-explicit-model", translate_api_timeout=17,
+                      ffprobe_timeout=11)
         translation_url = "https://translation.invalid/v1/chat/completions"
         translation_model = "fixture-explicit-model"
         timeout = 17
@@ -146,6 +156,7 @@ def test_cli_engine_and_typed_load_agree_on_the_same_config(tmp_path, explicit_u
          "model": translation_model, "timeout": timeout},
     ]
     assert outcome["typed_endpoint"] == expected_mimo
+    assert outcome["probe_timeouts"] == [config.get("ffprobe_timeout", 30)]
     translated = (tmp_path / "out/audio_翻译.txt").read_text(encoding="utf-8").strip().splitlines()
     assert translated[-1] == "本季度营收增长。"
     assert (tmp_path / "out/audio_中英对照.txt").is_file()
@@ -222,15 +233,23 @@ def test_legacy_config_loader_is_the_owner_export(tmp_path):
 
 
 
-def test_bad_config_keeps_the_transcript_and_records_the_translation_cause(tmp_path):
-    result = _run_cli(tmp_path, "{", "--engine", "whisper", "--language", "en")
-    assert result["typed_error"] == "JSONDecodeError"
-    assert [call["kind"] for call in result["calls"]] == ["local_engine", "local_transcription"]
-    assert {f.name for f in (tmp_path / "out").iterdir()} == {"audio_原文.txt"}
+@pytest.mark.parametrize(("config", "error_type"), [
+    ("{", "JSONDecodeError"),
+    ("null", "ConfigError"),
+    ([], "ConfigError"),
+    ({"paragraph_max_chars": 1}, "ConfigError"),
+])
+def test_invalid_config_rejects_before_work(tmp_path, config, error_type):
+    result = _run_cli(
+        tmp_path, config, "--engine", "whisper", "--language", "en", expected_code=1
+    )
+    assert result["calls"] == []
+    assert not (tmp_path / "out").exists()
 
     details, = (tmp_path / "feedback").glob("*.details.jsonl")
     rows = [json.loads(line) for line in details.read_text(encoding="utf-8").splitlines()]
-    finished, = [row for row in rows if row.get("phase") == "finished"]
-    translation = finished["translation"]
-    assert translation["requested"] is True and translation["ran"] is False
-    assert translation["unavailable_error_type"] == "JSONDecodeError"
+    started, = [row for row in rows if row.get("phase") == "startup"]
+    assert started["stage"] == "config"
+    assert started["exit_code"] == 1
+    assert started["invocations"] == {"engine_started": False, "translation_attempted": False}
+    assert started["errors"][0]["error_type"] == error_type

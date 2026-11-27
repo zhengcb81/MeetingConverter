@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import subprocess
@@ -9,10 +10,12 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from config import DEFAULT_FFPROBE_TIMEOUT
 from exceptions import AudioProcessError, EngineError
 
 MIMO_SUPPORTED = {"wav", "mp3"}
 MAX_BASE64_MB = 4.0
+_MEDIA_PROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def detect_format(path) -> Optional[str]:
@@ -27,22 +30,52 @@ def estimate_base64_size_mb(path) -> float:
     return size * 4 / 3 / (1024 * 1024)
 
 
-def get_audio_duration(path) -> float:
-    """用 ffprobe 获取音频时长（秒）。"""
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        capture_output=True,
-    )
-    return float(result.stdout.decode("utf-8", errors="replace").strip())
+def get_audio_duration(path, *, timeout: float = DEFAULT_FFPROBE_TIMEOUT) -> float:
+    """用有界的 ffprobe 子进程读取音频时长（秒）。"""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout,
+            creationflags=_MEDIA_PROCESS_FLAGS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AudioProcessError(
+            "ffprobe 获取时长超时", "duration_probe", process="ffprobe"
+        ) from exc
+    except OSError as exc:
+        raise AudioProcessError(
+            "ffprobe 启动失败", "duration_probe", process="ffprobe"
+        ) from exc
+
+    if result.returncode != 0:
+        raise AudioProcessError(
+            f"ffprobe 获取时长失败 (exit={result.returncode})",
+            "duration_probe",
+            result.returncode,
+            process="ffprobe",
+        )
+    try:
+        duration = float(result.stdout.decode("utf-8", errors="replace").strip())
+    except ValueError as exc:
+        raise AudioProcessError(
+            "ffprobe 返回无效时长", "duration_probe", result.returncode, process="ffprobe"
+        ) from exc
+    if not math.isfinite(duration) or duration < 0:
+        raise AudioProcessError(
+            "ffprobe 返回无效时长", "duration_probe", result.returncode, process="ffprobe"
+        )
+    return duration
 
 
 def _parse_silence_starts(stderr_output: str) -> List[float]:
@@ -98,9 +131,12 @@ def _estimate_max_chunk_duration(
 def split_by_silence(
     path,
     max_size_mb: float = MAX_BASE64_MB,
+    *,
+    total_duration: Optional[float] = None,
 ) -> List[Tuple[Path, float, float]]:
     """按静音点切分音频，返回 [(临时文件路径, start, end), ...]。"""
-    total_duration = get_audio_duration(path)
+    if total_duration is None:
+        total_duration = get_audio_duration(path)
     max_chunk_duration = _estimate_max_chunk_duration(path, total_duration, max_size_mb)
 
     if total_duration <= max_chunk_duration:
@@ -118,6 +154,8 @@ def split_by_silence(
             "-",
         ],
         capture_output=True,
+        stdin=subprocess.DEVNULL,
+        creationflags=_MEDIA_PROCESS_FLAGS,
     )
     if detect.returncode:
         raise AudioProcessError(f"ffmpeg 静音检测失败 (exit={detect.returncode})", "silence_detect", detect.returncode)
@@ -155,6 +193,8 @@ def split_by_silence(
                     str(tmp),
                 ],
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
+                creationflags=_MEDIA_PROCESS_FLAGS,
             )
             if cut.returncode:
                 raise AudioProcessError(f"ffmpeg 切片失败 (exit={cut.returncode})", "segment", cut.returncode)

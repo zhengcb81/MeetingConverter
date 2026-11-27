@@ -125,6 +125,18 @@ class TestTranscribe:
         assert len(result.segments) >= 1
         assert "营收增长" in result.segments[0].text
 
+    def test_probe_failure_does_not_send_audio(self, mocker, audio_file):
+        from exceptions import AudioProcessError
+
+        engine = MiMoEngine(api_key="synthetic-key")
+        probe = AudioProcessError("bad audio", "duration_probe", 1)
+        mocker.patch("engines.mimo.get_audio_duration", side_effect=probe)
+        call_api = mocker.patch.object(engine, "_call_api")
+
+        with pytest.raises(AudioProcessError):
+            engine.transcribe(str(audio_file))
+        call_api.assert_not_called()
+
     def test_auto_language_returns_auto(self, mocker, audio_file):
         eng = MiMoEngine(api_key="key")
         mocker.patch.object(eng, "_call_api", return_value="文本")

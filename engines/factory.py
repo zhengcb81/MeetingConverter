@@ -45,7 +45,9 @@ def _create_mimo(config: Config):
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         raise ValueError("MiMo API key 未配置（config.mimo_api_key）")
     config.validate_mimo()
-    return MiMoEngine(api_key=api_key, base_url=config.mimo_base_url)
+    return MiMoEngine(
+        api_key=api_key, base_url=config.mimo_base_url, ffprobe_timeout=config.ffprobe_timeout
+    )
 
 
 def _create_whisper(model: str, device: str, compute_type: str):

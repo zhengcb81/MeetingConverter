@@ -23,12 +23,15 @@ class EngineError(MeetingConverterError):
 
 
 class AudioProcessError(EngineError):
-    """A known FFmpeg subprocess exit, with its operation and original code."""
+    """An audio tool failure with its operation and original exit code when known."""
 
-    def __init__(self, message: str, stage: str, returncode: int) -> None:
+    def __init__(
+        self, message: str, stage: str, returncode: Optional[int] = None, *, process: str = "ffmpeg"
+    ) -> None:
         super().__init__(message)
         self.stage = stage
         self.returncode = returncode
+        self.process = process
 
 
 class ConfigError(MeetingConverterError):

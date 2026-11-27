@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from subprocess import CompletedProcess
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,7 +18,7 @@ from audio_utils import (
     get_audio_duration,
     split_by_silence,
 )
-from exceptions import EngineError
+from exceptions import AudioProcessError, EngineError
 
 
 class TestDetectFormat:
@@ -87,10 +88,44 @@ class TestChooseSplitPoints:
 class TestGetAudioDuration:
     def test_calls_ffprobe(self, mocker):
         mock_run = mocker.patch("audio_utils.subprocess.run")
-        mock_run.return_value = MagicMock(stdout=b"123.45\n")
+        mock_run.return_value = CompletedProcess(["ffprobe"], 0, stdout=b"123.45\n")
         dur = get_audio_duration("fake.mp3")
         assert dur == 123.45
         assert mock_run.call_args[0][0][0] == "ffprobe"
+        assert mock_run.call_args.kwargs["timeout"] > 0
+
+    @pytest.mark.parametrize("entry", ["nonzero", "timeout"])
+    def test_handles_failed_ffprobe_subprocess(self, monkeypatch, entry):
+        run = subprocess.run
+        script = (
+            "print(123.45); raise SystemExit(4)" if entry == "nonzero"
+            else "import time; time.sleep(10)"
+        )
+
+        def substitute_ffprobe(args, **kwargs):
+            assert args[0] == "ffprobe"
+            assert kwargs["stdin"] == subprocess.DEVNULL
+            assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            return run([sys.executable, "-B", "-c", script], **kwargs)
+
+        monkeypatch.setattr(audio_utils.subprocess, "run", substitute_ffprobe)
+        with pytest.raises(AudioProcessError, match="ffprobe") as found:
+            if entry == "nonzero":
+                get_audio_duration("input.wav")
+            else:
+                get_audio_duration("input.wav", timeout=0.3)
+        assert found.value.stage == "duration_probe"
+        assert found.value.returncode == (4 if entry == "nonzero" else None)
+        if entry == "timeout":
+            assert isinstance(found.value.__cause__, subprocess.TimeoutExpired)
+
+    @pytest.mark.parametrize("output", [b"unknown", b"nan", b"-1"])
+    def test_rejects_invalid_duration_from_successful_ffprobe(self, mocker, output):
+        mocker.patch("audio_utils.subprocess.run", return_value=CompletedProcess(
+            ["ffprobe"], 0, stdout=output
+        ))
+        with pytest.raises(AudioProcessError, match="ffprobe"):
+            get_audio_duration("input.wav")
 
 
 class TestSplitBySilence:

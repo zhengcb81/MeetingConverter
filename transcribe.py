@@ -18,6 +18,7 @@ MeetingConverter - 投资者会议音频转文字引擎 (v2)
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -37,6 +38,7 @@ from core.local_diagnostics import cli_diagnostics, record_event, record_failure
 from core.pipeline import merge_into_paragraphs, transcribe_one
 from core.output import write_original, write_translated, write_bilingual
 from engines.factory import create_engine
+from exceptions import ConfigError
 from translator import Translator
 
 logger = logging.getLogger(__name__)
@@ -145,6 +147,35 @@ def _run(startup) -> int:
         )
         return 1
 
+    cli_values = dict(
+        transcription_engine=args.engine,
+        language=args.language,
+        whisper_model=args.model,
+        whisper_device=args.device,
+        whisper_compute_type=args.compute_type,
+    )
+    overrides = {key: value for key, value in cli_values.items() if value is not None}
+    missing_config = None
+    try:
+        try:
+            raw = load_config()
+        except FileNotFoundError as exc:
+            missing_config = exc
+            raw = {}
+        settings = normalize_config({**raw, **overrides})
+        settings.validate_transcription()
+    except (ConfigError, json.JSONDecodeError, UnicodeError, OSError) as exc:
+        logger.error("错误: 无法使用 config.json: %s", type(exc).__name__)
+        record_failure("config", exc)
+        startup.record_outcome(
+            STARTUP_LOCAL_IO_FAILED if isinstance(exc, OSError) else STARTUP_REQUEST_REJECTED,
+            stage="config",
+            exit_code=1,
+            errors=[exc],
+            translate_requested=translate_requested,
+        )
+        return 1
+
     output_dir = Path(args.output)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -160,38 +191,15 @@ def _run(startup) -> int:
         )
         return 1
 
-    cfg = None
-    config_error = None
-    cli_values = dict(
-        transcription_engine=args.engine,
-        language=args.language,
-        whisper_model=args.model,
-        whisper_device=args.device,
-        whisper_compute_type=args.compute_type,
-    )
-    overrides = {key: value for key, value in cli_values.items() if value is not None}
-    try:
-        raw = load_config()
-        if raw is not None:
-            candidate = normalize_config({**raw, **overrides})
-            candidate.validate_transcription()
-            cfg = candidate
-    except Exception as e:
-        config_error = e
-        logger.info("配置加载失败 (使用默认): %s", type(e).__name__)
-        record_failure("config", e)
-    settings = cfg if cfg is not None else normalize_config(overrides)
-
     translator_obj = None
     translator_error = None
     if translate_requested:
-        if cfg is None:
-            # 请求了翻译但配置不可用：如实记录"翻译未运行"的原因。
-            translator_error = config_error
-            logger.info("翻译器不可用 (仅转写): 配置加载失败")
+        if missing_config is not None:
+            translator_error = missing_config
+            logger.info("翻译器不可用 (仅转写): config.json 缺失")
         else:
             try:
-                translator_obj = Translator(cfg)
+                translator_obj = Translator(settings)
                 logger.info(f"翻译引擎: DeepSeek ({translator_obj.model})")
             except Exception as e:
                 translator_error = e

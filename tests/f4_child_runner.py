@@ -244,7 +244,7 @@ def _install(repo: Path, root: Path, scenario: str):
         from engines.mimo import MiMoEngine
 
         time.sleep = lambda _seconds: None  # 固定重试退避，测试不真等 6 秒
-        mimo_module.get_audio_duration = lambda _path: 1.0
+        mimo_module.get_audio_duration = lambda _path, *, timeout: 1.0
         mimo_module.urllib.request.urlopen = _mimo_transport(root, scenario)
         mimo = MiMoEngine(
             api_key=MIMO_SYNTHETIC_KEY,

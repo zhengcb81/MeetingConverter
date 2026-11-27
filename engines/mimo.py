@@ -22,6 +22,7 @@ from audio_utils import (
     get_audio_duration,
     split_by_silence,
 )
+from config import DEFAULT_FFPROBE_TIMEOUT
 from config import DEFAULT_MIMO_URL as MIMO_API_URL
 from core.provider_exchange import ProviderExchange
 from engines.base import TranscriptionResult, UnsupportedFormatError
@@ -104,6 +105,8 @@ class MiMoEngine:
         base_url: str = MIMO_API_URL,
         model: str = MIMO_MODEL,
         max_chars: int = 2000,
+        *,
+        ffprobe_timeout: float = DEFAULT_FFPROBE_TIMEOUT,
     ):
         if not api_key:
             raise ValueError("MiMo API key 未配置")
@@ -111,6 +114,7 @@ class MiMoEngine:
         self._base_url = base_url
         self._model = model
         self._max_chars = max_chars
+        self._ffprobe_timeout = ffprobe_timeout
 
     def transcribe(
         self,
@@ -124,14 +128,14 @@ class MiMoEngine:
                 f"MiMo 不支持该格式: {audio_path}（仅 wav/mp3）"
             )
 
+        duration = get_audio_duration(audio_path, timeout=self._ffprobe_timeout)
         size_mb = estimate_base64_size_mb(audio_path)
         if size_mb > MAX_BASE64_MB:
-            text = self._transcribe_chunked(audio_path, language)
+            text = self._transcribe_chunked(audio_path, language, duration)
         else:
             audio_data = self._encode_audio(audio_path, fmt)
             text = self._call_api(audio_data, language)
 
-        duration = get_audio_duration(audio_path)
         segments = merge_text_into_paragraphs(text, self._max_chars)
         detected_lang = language if language and language != "auto" else "auto"
         return TranscriptionResult(
@@ -142,8 +146,10 @@ class MiMoEngine:
             paragraph_level=True,
         )
 
-    def _transcribe_chunked(self, audio_path: str, language: Optional[str]) -> str:
-        chunks = split_by_silence(audio_path)
+    def _transcribe_chunked(
+        self, audio_path: str, language: Optional[str], duration: float
+    ) -> str:
+        chunks = split_by_silence(audio_path, total_duration=duration)
         try:
             parts = []
             for chunk_path, _start, _end in chunks:

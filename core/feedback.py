@@ -317,7 +317,7 @@ def describe_error(error: BaseException, location: str) -> Dict[str, Any]:
         "location": location,
     }
     if isinstance(error, AudioProcessError):
-        facts.update(process="ffmpeg", process_step=error.stage, process_exit=error.returncode)
+        facts.update(process=error.process, process_step=error.stage, process_exit=error.returncode)
     return facts
 
 
