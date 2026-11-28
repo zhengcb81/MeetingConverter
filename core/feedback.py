@@ -5,8 +5,7 @@
 步骤日志。旁路本身不写 stdout/stderr、不改返回值、不改任何产物字节，也不触碰
 逐字稿正文。旁路写不进去时，只在本仓已有的本地诊断通道（logging）和 recorder
 自身的计数上报告；业务结果、退出码与重试行为完全由主任务自己决定。注意：
-本仓 CLI 把 logging 接到 stdout（``transcribe.py``），因此这些**诊断行**会出现在
-CLI 的 stdout 上，业务日志行本身不变。
+本仓 CLI 把人类可读的诊断放在 stderr；可冷读的结构化诊断进入本仓运行日志。
 
 词表（稳定结果词；细节留在本仓的 details 记录里）：
 
@@ -85,8 +84,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from core.diagnostic_storage import append_jsonl
+from core.feedback_runtime import (
+    ADAPTER_VERSION,
+    FEEDBACK_ATTEMPT_ID_ENV as FEEDBACK_ATTEMPT_ID_ENV,
+    FEEDBACK_DIR_ENV,
+    FEEDBACK_OUT_ENV,
+    FEEDBACK_RUN_ID_ENV as FEEDBACK_RUN_ID_ENV,
+    FEEDBACK_STATE_ROOT_ENV as FEEDBACK_STATE_ROOT_ENV,
+    cause_types,
+    default_state_root as default_state_root,
+    describe_error,
+    feedback_io_path,
+    resolve_run_identity,
+    resolve_state_root,
+    safe_identity,
+)
+from core.local_diagnostics import record_event, record_failure
 from core.output import WrittenOutput
-from exceptions import AudioProcessError, explicit_cause_types
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +109,6 @@ OBSERVATION_SCHEMA = "feedback-observation/1"
 DETAIL_SCHEMA = "meeting-converter-feedback-detail/1"
 DELIVERY_SCHEMA = "feedback-delivery-ready/1"
 OWNER = "meeting-converter"
-ADAPTER_VERSION = "meeting-converter-feedback/1.1.0"
-
-FEEDBACK_OUT_ENV = "RESEARCH_FEEDBACK_OUT"
-FEEDBACK_DIR_ENV = "RESEARCH_FEEDBACK_DIR"
-FEEDBACK_STATE_ROOT_ENV = "RESEARCH_FEEDBACK_STATE_ROOT"
-FEEDBACK_RUN_ID_ENV = "RESEARCH_FEEDBACK_RUN_ID"
-FEEDBACK_ATTEMPT_ID_ENV = "RESEARCH_FEEDBACK_ATTEMPT_ID"
 
 DISPOSITIONS = ("expected", "deviation", "unknown")
 
@@ -250,16 +258,6 @@ def _details_identity(record: Mapping[str, Any]) -> str:
     return "fb-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def feedback_io_path(path: Path) -> Path:
-    """Translate a physical feedback path without changing its logical identity."""
-    if os.name != "nt":
-        return path
-    absolute = os.path.abspath(path)
-    if absolute.startswith(("\\\\?\\", "\\\\.\\")):
-        return Path(absolute)
-    return Path("\\\\?\\UNC\\" + absolute[2:] if absolute.startswith("\\\\") else "\\\\?\\" + absolute)
-
-
 def _read_jsonl(path: Path) -> List[dict]:
     """读取一个 JSONL 文件；读不到或不是 JSON 行时不给记录。"""
     try:
@@ -284,41 +282,7 @@ def _read_jsonl(path: Path) -> List[dict]:
 
 
 def _exception_cause_chain(error: BaseException) -> List[str]:
-    """脱敏的因果链：只取异常类别名，不含任何消息正文。
-
-    外层异常的类别由 ``error_type`` 承担，这里只返回它的底层原因（``__cause__``
-    优先，未抑制时 ``__context__`` 兜底），因此 TimeoutError 与另一个内因可以
-    冷读分辨。若异常自带已脱敏的 ``cause_types``（例如 MiMo 在切断原始链前
-    投影好的归因），优先使用它，避免为了安全而丢掉底层类别。
-    """
-    explicit = explicit_cause_types(error)
-    if explicit is not None:
-        return explicit
-    chain: List[str] = []
-    seen: set = set()
-    current: Optional[BaseException] = error
-    while current is not None and id(current) not in seen and len(chain) < 8:
-        seen.add(id(current))
-        name = type(current).__name__
-        if name not in chain:
-            chain.append(name)
-        following = current.__cause__
-        if following is None and not current.__suppress_context__:
-            following = current.__context__
-        current = following
-    return chain[1:]
-
-
-def describe_error(error: BaseException, location: str) -> Dict[str, Any]:
-    """一条脱敏异常记录：类别、脱敏因果链与本仓相对代码位置。"""
-    facts = {
-        "error_type": type(error).__name__,
-        "cause_types": _exception_cause_chain(error),
-        "location": location,
-    }
-    if isinstance(error, AudioProcessError):
-        facts.update(process=error.process, process_step=error.stage, process_exit=error.returncode)
-    return facts
+    return cause_types(error)
 
 
 class FeedbackRecorder:
@@ -347,8 +311,8 @@ class FeedbackRecorder:
             if details_path is not None
             else self.out_path.with_name(self.out_path.name + ".details.jsonl")
         )
-        self.run_id = run_id
-        self.attempt_id = attempt_id
+        self.run_id = safe_identity(run_id)
+        self.attempt_id = safe_identity(attempt_id)
         self.version = version
         self.owner = owner
         # 注入的 sink 取代文件本身，用来在不改宿主权限模型的前提下演练
@@ -405,7 +369,7 @@ class FeedbackRecorder:
                 terminal_check_id=terminal_check_id,
             )
         except Exception as exc:  # 防御：投影永远不成为业务失败的原因
-            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}", exc)
             return False
 
     def _record(
@@ -492,26 +456,17 @@ class FeedbackRecorder:
             try:
                 sink(line)
             except Exception as exc:
-                self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+                self._note_failure(f"feedback_write_failed:{type(exc).__name__}", exc)
                 return False
             return True
         try:
-            path = feedback_io_path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a+b") as handle:
-                # Keep a truncated old record on a separate line from the next append.
-                handle.seek(0, os.SEEK_END)
-                if handle.tell():
-                    handle.seek(-1, os.SEEK_END)
-                    if handle.read(1) != b"\n":
-                        line = "\n" + line
-                handle.write(line.encode("utf-8"))
+            append_jsonl(path, line.encode("utf-8"))
         except OSError as exc:
-            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}", exc)
             return False
         return True
 
-    def _note_failure(self, kind: str) -> None:
+    def _note_failure(self, kind: str, error: BaseException | None = None) -> None:
         """记录一条不完整的诊断，并在本仓已有的本地诊断通道上报告。
 
         诊断留在 recorder 内存里，同时走 logging（stdout/stderr 的内容不受
@@ -520,7 +475,11 @@ class FeedbackRecorder:
         """
         self.write_failures += 1
         self.diagnostics.append(kind)
-        logger.warning(f"反馈旁路写入失败（不影响本次转录结果）: {kind}")
+        if error is None:
+            record_event("feedback_delivery", "error", diagnostic_code=kind)
+        else:
+            record_failure("feedback_delivery", error, diagnostic_code=kind)
+        logger.warning("反馈旁路写入失败（不影响本次转录结果）: %s", kind)
 
     def note_failure(self, kind: str) -> None:
         """对外的诊断入口（供 flush 兜底使用）。"""
@@ -531,27 +490,6 @@ class FeedbackRecorder:
 
 _RECORDERS: Dict[Tuple[str, str, str], FeedbackRecorder] = {}
 _LAST_RECORDER: Optional[FeedbackRecorder] = None
-#: 宿主没有给出运行身份时，本进程自成一个运行——同一个进程里的所有操作
-#: 必须属于同一个运行，否则一批文件会被报成许多个互不相干的运行。
-_PROCESS_RUN_ID = "run-" + uuid.uuid4().hex[:12]
-
-
-def default_state_root() -> Path:
-    """owner 自有的持久状态根：本仓 ``output/.feedback``。"""
-    return Path(__file__).resolve().parents[1] / "output" / ".feedback"
-
-
-def resolve_state_root(environ: Mapping[str, str]) -> Path:
-    value = environ.get(FEEDBACK_STATE_ROOT_ENV)
-    return Path(value.strip()) if isinstance(value, str) and value.strip() else default_state_root()
-
-
-def resolve_run_identity(environ: Mapping[str, str]) -> Tuple[str, str]:
-    run_id = environ.get(FEEDBACK_RUN_ID_ENV)
-    attempt_id = environ.get(FEEDBACK_ATTEMPT_ID_ENV)
-    return _PROCESS_RUN_ID if not _is_str(run_id) else run_id, (
-        "attempt-1" if not _is_str(attempt_id) else attempt_id
-    )
 
 
 def resolve_delivery_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
@@ -667,7 +605,7 @@ class DeliveringRecorder(FeedbackRecorder):
                     time.sleep(0.01)
             return False
         except OSError as exc:
-            self._note_failure(f"feedback_write_failed:{type(exc).__name__}")
+            self._note_failure(f"feedback_write_failed:{type(exc).__name__}", exc)
             return False
         finally:
             if tmp is not None:
@@ -757,7 +695,7 @@ def recorder_from_env(
                 recorder = FeedbackRecorder(out, run_id=run_id, attempt_id=attempt_id)
             except Exception as exc:
                 # 目的地不合法（例如没有文件名的盘符）：旁路不可用，但主任务照常。
-                logger.warning(f"反馈旁路目的地不可用（不影响本次转录结果）: {type(exc).__name__}")
+                record_failure("feedback_destination", exc, notice=(logger, f"反馈旁路目的地不可用: {type(exc).__name__}"))
                 return None
             _RECORDERS[key] = recorder
         _LAST_RECORDER = recorder
@@ -766,7 +704,7 @@ def recorder_from_env(
     try:
         delivery_dir = resolve_delivery_dir(env)
     except Exception as exc:
-        logger.warning(f"反馈交付目录不可用（不影响本次转录结果）: {type(exc).__name__}")
+        record_failure("feedback_destination", exc, notice=(logger, f"反馈交付目录不可用: {type(exc).__name__}"))
         return None
     key = ("delivery:" + str(delivery_dir), run_id, attempt_id)
     recorder = _RECORDERS.get(key)
@@ -777,7 +715,7 @@ def recorder_from_env(
                 recovery_dir=resolve_state_root(env) / "recovery",
             )
         except Exception as exc:
-            logger.warning(f"反馈交付目录不可用（不影响本次转录结果）: {type(exc).__name__}")
+            record_failure("feedback_destination", exc, notice=(logger, f"反馈交付目录不可用: {type(exc).__name__}"))
             return None
         _RECORDERS[key] = recorder
     _LAST_RECORDER = recorder
@@ -1097,7 +1035,10 @@ class OperationFeedback:
             except Exception as exc:  # 旁路的常规异常不替换业务结果，但保留中断信号并记日志
                 reason = f"feedback_write_failed:{type(exc).__name__}"
                 facts = describe_error(exc, "core/feedback.py#OperationFeedback.flush")
-                logger.warning("%s diagnostic=%s", reason, facts, extra={"mc_feedback_failure": facts})
+                record_failure(
+                    "feedback_projection", exc, notice=(logger, reason),
+                    notice_context={"mc_feedback_failure": facts}, step_id=self.step_id,
+                )
                 self._recorder.note_failure(reason)
 
     # ── 内部 ──────────────────────────────────────────────────────
@@ -1345,12 +1286,13 @@ def begin_operation(
     try:
         recorder = recorder_from_env(environ)
     except Exception as exc:  # 防御：投影永远不成为业务失败的原因
-        logger.warning(f"反馈旁路不可用（不影响本次转录结果）: {type(exc).__name__}")
+        record_failure("feedback_initialization", exc, notice=(logger, f"反馈旁路不可用: {type(exc).__name__}"))
         recorder = None
     mode = MODE_TRANSLATED if translate_requested else MODE_ORIGINAL_ONLY
     try:
         input_id = input_identity(audio_path)
-    except Exception:
+    except Exception as exc:
+        record_failure("input_identity", exc)
         input_id = hashlib.sha256(str(audio_path).encode("utf-8", "replace")).hexdigest()[:12]
     return OperationFeedback(
         recorder,
@@ -1482,6 +1424,6 @@ def begin_startup(
     try:
         recorder = recorder_from_env(environ)
     except Exception as exc:  # 防御：投影永远不成为业务失败的原因
-        logger.warning(f"反馈旁路不可用（不影响本次启动结果）: {type(exc).__name__}")
+        record_failure("feedback_initialization", exc, notice=(logger, f"反馈启动旁路不可用: {type(exc).__name__}"))
         recorder = None
     return StartupFeedback(recorder)

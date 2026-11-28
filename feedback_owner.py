@@ -12,7 +12,8 @@ from contextlib import closing
 from pathlib import Path
 from urllib.parse import quote
 
-from core.feedback import feedback_io_path
+from core.feedback_runtime import feedback_io_path
+from core.local_diagnostics import diagnosed_command, record_event, record_failure
 
 OWNER = "meeting-converter"
 PUBLICATION = "mc-publication/1"
@@ -316,6 +317,7 @@ def _publication(occurrence, row, detail):
             "current": current, "retained": sorted(retained), "missing": sorted(missing)}
 
 
+@diagnosed_command("feedback-owner")
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, type=Path)
@@ -328,6 +330,7 @@ def main(argv=None):
         commands.add_parser(action).add_argument("action_id")
     args = parser.parse_args(argv)
     owner = OwnerRuntime(args.db, args.sidecar, args.sidecar_dir)
+    exit_code = 0
     try:
         if args.action.startswith("get-"):
             receipt = owner.read(args.action_id)
@@ -341,11 +344,15 @@ def main(argv=None):
                         payload = {"publication": publication}
         else:
             payload = owner.dispatch(args.action, json.load(sys.stdin, object_pairs_hook=_unique))
-        print(_json(payload))
+            if payload.get("state") == "unknown":
+                record_event(args.action, "unconfirmed")
+        response = _json(payload)
     except (ValueError, OSError, sqlite3.Error, RecursionError) as error:
-        print(_json({"state": "unknown", "error_type": type(error).__name__}))
-        return 2
-    return 0
+        record_failure(args.action, error)
+        response = _json({"state": "unknown", "error_type": type(error).__name__})
+        exit_code = 2
+    print(response)
+    return exit_code
 
 
 if __name__ == "__main__":

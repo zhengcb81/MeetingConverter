@@ -209,25 +209,15 @@ class MiMoEngine:
                 diagnostic = _diagnostic_fields(
                     e, f"attempt={attempt + 1}/{max_retries}", exchange.http_status
                 )
-                exchange.record_failure(e)
                 if exchange.may_retry and attempt < max_retries - 1:
                     wait = 2 ** (attempt + 1)
-                    logger.warning(
-                        "MiMo API 重试 %d/%d (%ds): %s",
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                        diagnostic,
-                    )
+                    message = f"MiMo API 重试 {attempt + 1}/{max_retries} ({wait}s): {diagnostic}"
+                    exchange.record_failure(e, notice=(logger, message))
                     time.sleep(wait)
                 else:
                     attempts = attempt + 1
                     failure_text = _diagnostic_fields(e, f"attempts={attempts}", exchange.http_status)
-                    logger.error(
-                        "MiMo API 失败（%d次尝试后）: %s",
-                        attempts,
-                        failure_text,
-                    )
+                    exchange.record_failure(e)
                     failure = EngineError(
                         f"MiMo API 失败（{attempts}次尝试后）: {failure_text}"
                     )
@@ -242,4 +232,5 @@ class MiMoEngine:
                     break
         if failure is None:  # pragma: no cover - 循环必然以 return 或 failure 结束
             raise EngineError("MiMo API 失败（未知原因）")
+        logger.error("%s", failure)
         raise failure from None

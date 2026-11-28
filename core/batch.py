@@ -127,8 +127,8 @@ def run_batch(
             else:
                 skipped += 1
         except Exception as e:
-            record_failure("batch", e)
-            logger.error("错误: %s - %s", af.name, type(e).__name__)
+            message = f"错误: {af.name} - {type(e).__name__}"
+            record_failure("batch", e, notice=(logger, message))
             failures += 1
 
     # 输出统计

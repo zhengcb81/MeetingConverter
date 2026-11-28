@@ -688,7 +688,12 @@ class TestSidecarIsOptional:
         ]
         assert engine.transcribe.call_count == 1
         assert translator.translate_paragraphs.call_count == 1
-        assert not (tmp_path / "blocked-state").exists()
+        state = tmp_path / "blocked-state"
+        assert not (state / "observations").exists()
+        assert not (state / "recovery").exists()
+        diagnostics = state / "logs" / "library.jsonl"
+        events = [json.loads(line) for line in diagnostics.read_text(encoding="utf-8").splitlines()]
+        assert any(row["stage"] == "file" and row["phase"] == "completed" for row in events)
 
     def test_malformed_sidecar_path_does_not_break_the_run(
         self, engine, audio_file, tmp_output_dir, monkeypatch

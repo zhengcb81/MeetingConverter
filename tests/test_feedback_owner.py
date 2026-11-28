@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from subprocess_support import run_child
+from subprocess_support import fixture_environment, run_child
 
 from core import transcribe_one
 from engines.base import Segment, TranscriptionResult
@@ -59,13 +59,56 @@ def run_case(tmp_path, monkeypatch):
             body = json.dumps(arg).encode("ascii")
         elif arg:
             argv.append(arg)
-        outcome = run_child(argv, input=body, capture_output=True, timeout=15, check=True)
+        env = {**fixture_environment(), "RESEARCH_FEEDBACK_STATE_ROOT": str(tmp_path / "diagnostics")}
+        outcome = run_child(argv, input=body, env=env, capture_output=True, timeout=15, check=True)
         return json.loads(outcome.stdout)
 
     yield call, rows, occurrence, sidecar, db
     assert stale.read_text(encoding="utf-8") == "existing translated bytes"
     engine.transcribe.assert_called_once()
     translator.translate_paragraphs.assert_called_once()
+
+
+@pytest.mark.e2e_offline
+@pytest.mark.parametrize("layout", ("primary", "fallback", "unavailable"))
+def test_bad_owner_request_has_local_trace_and_preserves_wire_result(tmp_path, layout):
+    primary, fallback = tmp_path / "local-state", tmp_path / "feedback-inbox"
+    if layout != "primary":
+        primary.write_bytes(b"original primary blocker")
+    if layout == "unavailable":
+        fallback.write_bytes(b"original fallback blocker")
+    env = fixture_environment()
+    env.update(
+        RESEARCH_FEEDBACK_STATE_ROOT=str(primary),
+        RESEARCH_FEEDBACK_DIR=str(fallback),
+        RESEARCH_FEEDBACK_RUN_ID="owner-native-run",
+        RESEARCH_FEEDBACK_ATTEMPT_ID="owner-native-attempt",
+    )
+    db = tmp_path / "owner.sqlite"
+    credential = b"synthetic-owner-bearer-value-for-local-test"
+    request_body = b'{"payload":"Authorization: Bearer ' + credential
+    result = run_child(
+        [sys.executable, "-B", str(CLI), "--db", str(db), "reconcile"],
+        cwd=tmp_path, input=request_body, env=env, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout) == {"state": "unknown", "error_type": "JSONDecodeError"}
+    assert credential not in result.stdout + result.stderr
+    assert not db.exists()
+    if layout == "unavailable":
+        notice, = result.stderr.decode("utf-8").splitlines()
+        assert "diagnostic_log_unavailable" in notice
+        assert primary.read_bytes() == b"original primary blocker"
+        assert fallback.read_bytes() == b"original fallback blocker"
+        return
+    assert result.stderr == b""
+    root = primary if layout == "primary" else fallback
+    recorded = (root / "logs" / "feedback-owner.jsonl").read_bytes()
+    assert credential not in recorded
+    rows = list(map(json.loads, recorded.splitlines()))
+    fault, = [row for row in rows if row["phase"] == "error"]
+    assert (fault["run_id"], fault["attempt_id"]) == ("owner-native-run", "owner-native-attempt")
+    assert fault["error_type"] == "JSONDecodeError" and "feedback_owner.py" in fault["location"]
 
 
 def test_native_repair_reuses_the_original_evidence_and_saves_one_report(run_case):

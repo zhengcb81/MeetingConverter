@@ -23,7 +23,7 @@ from pathlib import Path
 import yaml
 
 from company import load_company_catalog
-from core.local_diagnostics import diagnosed_command
+from core.local_diagnostics import diagnosed_command, record_event
 
 COMPANIES_FILE = os.path.join(os.path.dirname(__file__) or ".", "companies.yaml")
 
@@ -57,6 +57,7 @@ def cmd_show(args):
     data = load_companies()
     name = args.name
     if name not in data:
+        record_event("company_catalog", "refused", reason="company_not_found")
         print(f"未找到: {name}")
         print(f"已知公司: {', '.join(data.keys())}")
         return
@@ -76,6 +77,7 @@ def cmd_show(args):
 def cmd_add(args):
     data = load_companies()
     if args.name in data:
+        record_event("company_catalog", "refused", reason="company_already_exists")
         print(f"公司已存在: {args.name}，用 update 修改")
         return
     entry = {"en": args.en or "", "ticker": args.ticker or "", "sector": args.sector or ""}
@@ -95,6 +97,7 @@ def cmd_add(args):
 def cmd_update(args):
     data = load_companies()
     if args.name not in data:
+        record_event("company_catalog", "refused", reason="company_not_found")
         print(f"未找到: {args.name}")
         return
     entry = data[args.name]
@@ -127,6 +130,7 @@ def _set_research_context(entry, args) -> None:
 def cmd_correct(args):
     data = load_companies()
     if args.name not in data:
+        record_event("company_catalog", "refused", reason="company_not_found")
         print(f"未找到: {args.name}")
         return
 
@@ -148,6 +152,7 @@ def cmd_correct(args):
             save_companies(data)
             print(f"已删除: \"{args.delete}\"")
         else:
+            record_event("company_catalog", "refused", reason="correction_not_found")
             print(f"未找到规则: \"{args.delete}\"")
         return
 
@@ -156,6 +161,7 @@ def cmd_correct(args):
         save_companies(data)
         print(f"已添加: \"{args.from_key}\" → \"{args.to}\"")
     else:
+        record_event("company_catalog", "refused", reason="missing_correction")
         print("需要 --from 和 --to 参数")
 
 
@@ -163,6 +169,7 @@ def cmd_import_corr(args):
     """从文件批量导入纠正规则，格式: wrong<tab>to 或 wrong|to"""
     data = load_companies()
     if args.name not in data:
+        record_event("company_catalog", "refused", reason="company_not_found")
         print(f"未找到: {args.name}")
         return
 
