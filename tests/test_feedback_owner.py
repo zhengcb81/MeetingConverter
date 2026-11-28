@@ -185,10 +185,11 @@ def test_legacy_credentials_can_be_cold_read_without_restoring_secret_requests(r
 
 @pytest.mark.e2e_offline
 def test_native_argument_error_redacts_credentials_and_keeps_argv_exit(tmp_path):
-    secrets = ("synthetic-basic-secret", "synthetic-folded-secret", "synthetic-userinfo-secret", "ghp_" + "a" * 24)
+    secrets = ("synthetic-basic-secret", "synthetic-folded-secret", "synthetic-userinfo-secret",
+               "ghp_" + "a" * 24, "synthetic-folded-continuation")
     supplied = [
         f"Authorization: Basic {secrets[0]}",
-        f"Authorization:\r\n Bearer\r\n {secrets[1]}",
+        f"Authorization:\r\n Bearer\r\n {secrets[1]}\r\n\t{secrets[4]}\nPreserved error boundary",
         f"HTTP403-https://user:{secrets[2]}@fixture.invalid/path",
         secrets[3],
     ]
@@ -200,6 +201,7 @@ def test_native_argument_error_redacts_credentials_and_keeps_argv_exit(tmp_path)
     )
     assert process.returncode == 2 and not process.stdout
     assert b"unrecognized arguments" in process.stderr
+    assert b"Preserved error boundary" in process.stderr
     local = (tmp_path / "logs" / "feedback-owner.jsonl").read_bytes()
     for secret in secrets:
         assert secret.encode() not in process.stderr + local

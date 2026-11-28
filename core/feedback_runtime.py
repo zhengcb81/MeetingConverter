@@ -22,6 +22,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PROCESS_RUN_ID = "run-" + uuid.uuid4().hex[:12]
 _CREDENTIAL = re.compile(
     r"(?i)(\b(?:proxy-)?authorization[ \t]*:[\r\n \t]*(?:bearer|basic)[\r\n \t]+)\S+"
+    r"(?:(?:\r\n|[\r\n])[ \t]+[^\r\n]*)*"
     r"|(?<=://)[^/@\s]+:[^/@\s]+(?=@)"
     r"|(?<![A-Za-z0-9])(?:sk-|tvly-|ghp_|AIza)[A-Za-z0-9_-]{12,}"
 )
