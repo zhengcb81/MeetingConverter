@@ -816,6 +816,7 @@ class TestDirectStartDelivery:
         assert proof["result"]["cost_state"] == "unknown"
         assert unavailable.read_bytes() == b"blocked inbox" and engine_calls(f4_root) == before
 
+    @pytest.mark.windows_only
     @pytest.mark.skipif(os.name != "nt", reason="Windows native path boundary")
     def test_long_state_directory_accepts_and_recovers_an_original_failure(self, f4_root):
         state = f4_root.joinpath(*("日" + "directory" * 4 for _ in range(7)))

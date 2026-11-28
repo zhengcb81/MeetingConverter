@@ -83,20 +83,15 @@ class Config:
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
-    """读取原始配置，显式路径优先，其次是项目自有 config.json。"""
-    paths = (config_path, os.path.join(os.path.dirname(__file__) or ".", "config.json"))
-    for path in paths:
-        if not path:
-            continue
-        try:
-            with open(path, encoding="utf-8") as stream:
-                data = json.load(stream)
-        except FileNotFoundError:
-            continue
-        if not isinstance(data, dict):
-            raise ConfigError("配置必须是 JSON 对象")
-        return data
-    raise FileNotFoundError("找不到配置文件，请确保项目目录下 config.json 存在")
+    """读取选定配置；只有未指定路径时才使用项目自己的 config.json。"""
+    path = config_path if config_path is not None else os.path.join(
+        os.path.dirname(__file__) or ".", "config.json"
+    )
+    with open(path, encoding="utf-8") as stream:
+        data = json.load(stream)
+    if not isinstance(data, dict):
+        raise ConfigError("配置必须是 JSON 对象")
+    return data
 
 
 def normalize_config(values: Optional[Union[Config, Mapping[str, Any]]] = None) -> Config:

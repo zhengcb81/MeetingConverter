@@ -21,9 +21,9 @@ import argparse
 import json
 import logging
 import sys
-import time
 from pathlib import Path
 
+from company import extract_company_from_filename, get_company_context, get_corrections
 from config import load_config, normalize_config
 from core.batch import get_audio_files, run_batch
 from core.feedback import (
@@ -33,16 +33,12 @@ from core.feedback import (
     STARTUP_REQUEST_REJECTED,
     begin_startup,
 )
-from core.formatter import fmt_ts
 from core.local_diagnostics import cli_diagnostics, record_event, record_failure
-from core.pipeline import merge_into_paragraphs, transcribe_one
-from core.output import write_original, write_translated, write_bilingual
 from engines.factory import create_engine
 from exceptions import ConfigError
 from translator import Translator
 
 logger = logging.getLogger(__name__)
-from company import extract_company_from_filename, get_company_context, get_corrections
 
 FINANCIAL_PROMPT_ZH = (
     "以下是投资者电话会议的内容，涉及财务报告、营收、净利润、毛利率、"
@@ -86,6 +82,7 @@ def _run(startup) -> int:
     )
     parser.add_argument("input", help="音频文件或目录")
     parser.add_argument("-o", "--output", default="output")
+    parser.add_argument("--config", help="使用指定的 JSON 配置文件")
     parser.add_argument(
         "-m",
         "--model",
@@ -158,8 +155,10 @@ def _run(startup) -> int:
     missing_config = None
     try:
         try:
-            raw = load_config()
+            raw = load_config() if args.config is None else load_config(args.config)
         except FileNotFoundError as exc:
+            if args.config is not None:
+                raise
             missing_config = exc
             raw = {}
         settings = normalize_config({**raw, **overrides})

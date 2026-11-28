@@ -1,131 +1,62 @@
-"""CI workflow 合同测试：静态校验 .github/workflows/ci.yml 满足快速可靠门约束。"""
+"""MeetingConverter CI must discover and execute the owner suites on both platforms."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
 
-WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
-
-PYTHON_VERSION = "3.13"
-
-ALLOWED_ACTIONS = ("actions/checkout", "actions/setup-python")
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github/workflows/ci.yml"
+POLICY = ROOT / "tests/contract/test_policy.json"
 
 
-def _load() -> dict:
-    data = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), "workflow YAML must parse to a mapping"
+def _workflow():
+    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
     return data
 
 
-def _on(data: dict) -> dict:
-    triggers = data.get("on", data.get(True))
-    assert isinstance(triggers, dict), "workflow must declare on: triggers"
-    return triggers
+def test_mainline_and_pr_workflows_share_the_same_job():
+    definition = _workflow()
+    triggers = definition.get("on", definition.get(True))
+    assert isinstance(triggers, dict)
+    assert set(triggers["push"]["branches"]) == {"master", "main"}
+    assert set(triggers["pull_request"]["branches"]) == {"master", "main"}
+    assert "workflow_dispatch" in triggers
 
 
-def _job() -> dict:
-    jobs = _load().get("jobs")
-    assert isinstance(jobs, dict) and jobs, "workflow must define jobs"
-    assert len(jobs) == 1, f"expected exactly one job, got {list(jobs)}"
-    job = next(iter(jobs.values()))
-    assert job.get("runs-on"), "job must declare runs-on"
-    return job
+def test_native_platforms_use_the_policy_and_exact_checkout():
+    job = _workflow()["jobs"]["test"]
+    policy = json.loads(POLICY.read_bytes())["platforms"]
+    rows = job["strategy"]["matrix"]["include"]
+    assert {(row["runner"], row["platform"], row["marks"]) for row in rows} == {
+        ("ubuntu-latest", "linux", policy["linux"]["markexpr"]),
+        ("windows-latest", "windows", policy["windows"]["markexpr"]),
+    }
+    checkout, = (step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ env.S6_REVISION }}"
+    assert job["env"]["S6_REVISION"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert 0 < job["timeout-minutes"] <= 15
 
 
-def _steps(job: dict) -> list:
-    steps = job.get("steps")
-    assert isinstance(steps, list) and steps, "job must declare steps"
-    return steps
-
-
-def _step_uses(steps: list, prefix: str) -> list:
-    return [s for s in steps if str(s.get("uses", "")).startswith(prefix)]
-
-
-def _step_runs(steps: list, needle: str) -> list:
-    return [s for s in steps if needle in str(s.get("run", ""))]
-
-
-def _covers(config, branch: str) -> bool:
-    branches = config.get("branches")
-    if branches is None:
-        return True
-    return branch in branches or "**" in branches
-
-
-def test_workflow_yaml_parses() -> None:
-    data = _load()
-    assert data.get("name")
-    assert _on(data)
-
-
-def test_push_runs_on_every_branch() -> None:
-    on = _on(_load())
-    assert "push" in on, "missing trigger: push"
-    config = on.get("push") or {}
-    assert _covers(config, "master"), "push must cover the mainline"
-    assert _covers(config, "feature/example"), "push must cover feature branches"
-
-
-def test_pull_request_targets_mainline() -> None:
-    on = _on(_load())
-    assert "pull_request" in on, "missing trigger: pull_request"
-    config = on.get("pull_request") or {}
-    assert _covers(config, "master") and _covers(config, "main")
-
-
-def test_single_job_without_matrix() -> None:
-    job = _job()
-    strategy = job.get("strategy") or {}
-    assert "matrix" not in strategy, "single Python version only; no matrix"
-
-
-def test_single_pinned_python_version() -> None:
-    steps = _steps(_job())
-    setup = _step_uses(steps, "actions/setup-python")
-    assert len(setup) == 1, "exactly one setup-python step"
-    assert setup[0].get("with", {}).get("python-version") == PYTHON_VERSION
-
-
-def test_pytest_runs_explicit_selector_without_full_repo_coverage() -> None:
-    steps = _steps(_job())
-    matches = _step_runs(steps, "pytest")
-    assert len(matches) == 1, "exactly one pytest step"
-    step = matches[0]
-    run = str(step.get("run", ""))
-    assert "tests/" in run, "pytest must target an explicit test selector"
-    assert "--cov=." not in run, "full-repo coverage must not gate every push"
-    assert "if" not in step, "the test step must never be skipped"
-    assert not step.get("continue-on-error"), "test failures must fail the job"
-
-
-def test_no_failure_masking() -> None:
-    job = _job()
-    assert not job.get("continue-on-error"), "job must not mask failures"
-    for step in _steps(job):
-        assert not step.get("continue-on-error"), "step must not mask failures"
-        expression = str(step.get("if", ""))
-        assert "always(" not in expression, f"always() masks failures: {expression}"
-
-
-def test_if_expressions_use_single_quoted_literals_only() -> None:
-    job = _job()
-    expressions = [str(job.get("if", ""))]
-    expressions += [str(step.get("if", "")) for step in _steps(job)]
-    for expression in expressions:
-        assert '"' not in expression, f"double-quoted literal breaks Actions: {expression}"
-
-
-def test_only_allowlisted_setup_actions() -> None:
-    for step in _steps(_job()):
-        uses = step.get("uses")
-        if uses is None:
-            continue
-        assert str(uses).startswith(ALLOWED_ACTIONS), f"unexpected action: {uses}"
-
-
-def test_job_timeout_is_bounded() -> None:
-    timeout = _job().get("timeout-minutes")
-    assert isinstance(timeout, int) and 0 < timeout <= 5, f"bad timeout: {timeout}"
+def test_actual_discovery_and_execution_are_both_mandatory():
+    job = _workflow()["jobs"]["test"]
+    steps = job["steps"]
+    assert not job.get("continue-on-error")
+    pytest_steps = [step for step in steps if "python -m pytest " in step.get("run", "")]
+    assert len(pytest_steps) == 2
+    collect, run = pytest_steps
+    assert "--collect-only" in collect["run"] and "--collect-only" not in run["run"]
+    for step in pytest_steps:
+        assert not step.get("if") and not step.get("continue-on-error")
+        command = step["run"]
+        assert command.endswith("tests/")
+        assert '--s6-revision "$S6_REVISION"' in command
+        assert '-m "$S6_MARKS"' in command
+        assert "--cov=" not in command
+    coverage, = (step for step in steps if "anti_trick_gate_spec coverage" in step.get("run", ""))
+    assert not coverage.get("if") and not coverage.get("continue-on-error")
+    assert "s6-collected.json s6-executed.json" in coverage["run"]
+    assert steps.index(coverage) > steps.index(run)

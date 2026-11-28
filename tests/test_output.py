@@ -305,6 +305,7 @@ class TestTempWriteFailure:
 
         assert _snapshot(tmp_path) == before
 
+    @pytest.mark.windows_only
     @pytest.mark.skipif(sys.platform != "win32", reason="Windows 目标被占用语义")
     @pytest.mark.parametrize("writer", ALL_WRITERS, ids=lambda w: w.__name__)
     def test_windows_open_target_blocks_replace(

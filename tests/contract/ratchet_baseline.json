@@ -1,0 +1,152 @@
+{
+  "constant_shapes": {
+    "audio_utils.py:MIMO_SUPPORTED": "7f9905966e9ce1780f56305ffad0820211ddf75b86248678a8820fa622b5ad0f",
+    "audio_utils.py:_MEDIA_PROCESS_FLAGS": "7466eae8e1d63106c118c14b6785d3b662d861eb5113c6c5e462e47ed23a9963",
+    "company.py:COMPANIES_FILE": "57d2cab4b0c2e53b64c2949ef1afd4e4ab021acc93a95d9c1345530aa5377492",
+    "company.py:_FALLBACK": "858b4c2513d31b11c18cee5a9d0a7a155ecad6ff6b63b3b55defd6ed41db8c65",
+    "company_manager.py:COMPANIES_FILE": "57d2cab4b0c2e53b64c2949ef1afd4e4ab021acc93a95d9c1345530aa5377492",
+    "core/batch.py:AUDIO_EXTENSIONS": "91f49640f3117a36e92fabdf728d5eae46ee5355f602658ed6ebd0f6bbede997",
+    "core/feedback.py:DISPOSITIONS": "051d81e0346d3420581cdfe2cc5a9165b33a396619713d24e2db206292872a2e",
+    "core/feedback.py:ROLES": "5777cc170fd8516069d1272c5016d247cbbb1243a290b640e82e7532f3220579",
+    "core/feedback.py:_RECORDERS": "195994bce1c51fd4b0166d060b283e0c4166eb662736a569f291925f48b7e3fd",
+    "core/local_diagnostics.py:_IMPLEMENTATION_FILES": "fd02e5d07e588d4b9a0c78af2cbbcabf8933fc4275c289923934d67b8abf0296",
+    "core/local_diagnostics.py:_LOGGER": "101d9764af21793644b4d17e79fae470dc07bb8f752f629ca927573b457311df",
+    "core/local_diagnostics.py:_STEP": "13467b9b33a5c26e9db18f89eaf7840421c5ad201de593cd191b3627cc7f3f08",
+    "engines/mimo.py:MIME_MAP": "ec66d9b5352c8af36fd98cbae485ae0d7cf98489131331cc733a7172cbead4c7",
+    "feedback_owner.py:ACTIONS": "8325ab4721143cfd85f27e766d495b7df254cc04912c6a5751cd0b8b54a2b737",
+    "feedback_owner.py:FAILED": "4b7b55fd6963410d87f06d5650acbe1caddaafcdd6f2c9281f1fdf21b33dfa53",
+    "feedback_owner.py:HEX": "a5a9f106c6a6795a6e55f73f19e43aa2dc07f6ec16df61a57a1f91c3f7194de2",
+    "feedback_owner.py:IDENTITY": "48e92f9243276fbef60a399519baf99517eab082bd6883c4cc98348666dbabb1",
+    "feedback_owner.py:ROLES": "a417b6c186759e7c09a8f8f4b9ac5fb6714eb757bb9041fb3896b27202529a1d",
+    "feedback_owner.py:STALE_OUTPUTS": "54b61447a14b4b3b36e51d04c5cf3a6d47d768f0eccbe9a02e60c128482fab75",
+    "feedback_owner.py:SUCCEEDED": "d96a42aec5df8679ebefdf595888df01b0d33522aff4731c32e8cd2fe31ded18",
+    "text_merger.py:SENTENCE_ENDERS": "c1e431fcb65b08bd547b14134d521d796f85c6bdc15cf7f4023b7b214f93d8d1"
+  },
+  "findings": [
+    {
+      "count": 1,
+      "path": "core/local_diagnostics.py",
+      "rule": "AT-05",
+      "signal": "shared-context-variable:_STEP"
+    },
+    {
+      "count": 1,
+      "path": "engines/factory.py",
+      "rule": "AT-06",
+      "signal": "deferred-import:engines.fallback"
+    },
+    {
+      "count": 1,
+      "path": "engines/factory.py",
+      "rule": "AT-06",
+      "signal": "deferred-import:engines.mimo"
+    },
+    {
+      "count": 1,
+      "path": "engines/factory.py",
+      "rule": "AT-06",
+      "signal": "deferred-import:engines.whisper"
+    },
+    {
+      "count": 4,
+      "path": "feedback_owner.py",
+      "rule": "AT-07",
+      "signal": "literal-sql-outside-owner"
+    },
+    {
+      "count": 2,
+      "path": "feedback_owner.py",
+      "rule": "AT-07",
+      "signal": "sqlite-connection-outside-owner"
+    },
+    {
+      "count": 1,
+      "path": "core/batch.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 6,
+      "path": "core/feedback.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 1,
+      "path": "core/pipeline.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 1,
+      "path": "engines/fallback.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 2,
+      "path": "engines/mimo.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 1,
+      "path": "engines/mimo.py",
+      "rule": "AT-11",
+      "signal": "suppressed-cause-without-local-log"
+    },
+    {
+      "count": 1,
+      "path": "feedback_owner.py",
+      "rule": "AT-11",
+      "signal": "handler-prints-to-machine-stdout"
+    },
+    {
+      "count": 1,
+      "path": "transcribe.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    },
+    {
+      "count": 1,
+      "path": "transcribe.py",
+      "rule": "AT-11",
+      "signal": "logger-overwrites-machine-output"
+    },
+    {
+      "count": 2,
+      "path": "translator.py",
+      "rule": "AT-11",
+      "signal": "logged-error-without-stack"
+    }
+  ],
+  "schema": "s6-static-baseline/1",
+  "source_files": [
+    "audio_utils.py",
+    "company.py",
+    "company_manager.py",
+    "compare_engines.py",
+    "config.py",
+    "config_validator.py",
+    "core/__init__.py",
+    "core/batch.py",
+    "core/feedback.py",
+    "core/formatter.py",
+    "core/local_diagnostics.py",
+    "core/output.py",
+    "core/pipeline.py",
+    "core/provider_exchange.py",
+    "engines/__init__.py",
+    "engines/base.py",
+    "engines/factory.py",
+    "engines/fallback.py",
+    "engines/mimo.py",
+    "engines/whisper.py",
+    "exceptions.py",
+    "feedback_owner.py",
+    "metrics.py",
+    "text_merger.py",
+    "transcribe.py",
+    "translator.py"
+  ]
+}
