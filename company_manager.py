@@ -15,7 +15,6 @@ company_manager.py - 公司知识库管理工具
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from pathlib import Path
@@ -23,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from company import load_company_catalog
-from core.local_diagnostics import diagnosed_command, record_event
+from core.local_diagnostics import DiagnosticArgumentParser, diagnosed_command, record_event
 
 COMPANIES_FILE = os.path.join(os.path.dirname(__file__) or ".", "companies.yaml")
 
@@ -195,7 +194,7 @@ def cmd_import_corr(args):
 
 @diagnosed_command("company-manager")
 def main():
-    parser = argparse.ArgumentParser(description="公司知识库管理工具")
+    parser = DiagnosticArgumentParser(description="公司知识库管理工具")
     sub = parser.add_subparsers(dest="command")
 
     # list

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import logging
@@ -40,6 +41,13 @@ def _stderr_notice(error_type: str) -> None:
         return
     with suppress(OSError, ValueError):
         print(f"meeting-converter diagnostic_log_unavailable error_type={error_type}", file=sys.stderr)
+
+
+class DiagnosticArgumentParser(argparse.ArgumentParser):
+    """Preserve argparse's usage output and exit status with safe input excerpts."""
+
+    def error(self, message: str) -> None:
+        super().error(redact_diagnostic(message))
 
 
 class DiagnosticFormatter(logging.Formatter):

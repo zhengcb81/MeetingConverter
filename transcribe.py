@@ -17,7 +17,6 @@ MeetingConverter - 投资者会议音频转文字引擎 (v2)
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import sys
@@ -33,7 +32,13 @@ from core.feedback import (
     STARTUP_REQUEST_REJECTED,
     begin_startup,
 )
-from core.local_diagnostics import DiagnosticFormatter, cli_diagnostics, record_event, record_failure
+from core.local_diagnostics import (
+    DiagnosticArgumentParser,
+    DiagnosticFormatter,
+    cli_diagnostics,
+    record_event,
+    record_failure,
+)
 from engines.factory import create_engine
 from exceptions import ConfigError
 from translator import Translator
@@ -77,7 +82,7 @@ def main():
 
 
 def _run(startup) -> int:
-    parser = argparse.ArgumentParser(
+    parser = DiagnosticArgumentParser(
         description="MeetingConverter v2 - 音频转文字+翻译"
     )
     parser.add_argument("input", help="音频文件或目录")
