@@ -19,7 +19,6 @@ import base64
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -30,6 +29,7 @@ from pathlib import Path
 
 import pytest
 from f4_child_runner import MIMO_SYNTHETIC_KEY, MIMO_VENDOR_BODY
+from subprocess_support import fixture_environment, open_child, run_child
 
 from engines.mimo import MiMoEngine
 from exceptions import EngineError
@@ -45,17 +45,7 @@ VENDOR_MARKER = "S2-MIMO-VENDOR-BODY"
 #: 合成音频的 base64 形态：不得出现在日志或观察里。
 AUDIO_MARKER = base64.b64encode(b"stub audio for mimo transport").decode("ascii")
 
-_ALLOWED_ENV = {
-    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME",
-    "USERPROFILE", "SYSTEMDRIVE", "COMSPEC", "APPDATA", "LOCALAPPDATA",
-}
-_FEEDBACK_VARS = (
-    "RESEARCH_FEEDBACK_OUT",
-    "RESEARCH_FEEDBACK_DIR",
-    "RESEARCH_FEEDBACK_RUN_ID",
-    "RESEARCH_FEEDBACK_ATTEMPT_ID",
-    "RESEARCH_FEEDBACK_STATE_ROOT",
-)
+
 IDENTITY_FIELDS = (
     "owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_id",
 )
@@ -306,10 +296,7 @@ class TestMiMoBoundaryDiagnostics:
 
 
 def _child_env(root: Path) -> dict:
-    env = {k: v for k, v in os.environ.items() if k.upper() in _ALLOWED_ENV}
-    env["PYTHONUTF8"] = "1"
-    for name in _FEEDBACK_VARS:
-        env.pop(name, None)
+    env = fixture_environment()
     env["RESEARCH_FEEDBACK_OUT"] = str(root / "feedback.jsonl")
     env["RESEARCH_FEEDBACK_RUN_ID"] = "s2-mimo-run"
     env["RESEARCH_FEEDBACK_ATTEMPT_ID"] = "s2-mimo-attempt"
@@ -322,7 +309,7 @@ def _run_child(root: Path, scenario: str, *, timeout: float = 90) -> dict:
         sys.executable, "-B", "-X", "utf8", str(RUNNER),
         "--child", str(REPO), str(root), scenario,
     ]
-    with subprocess.Popen(
+    with open_child(
         command, cwd=str(root), env=_child_env(root),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     ) as child:
@@ -394,9 +381,8 @@ def _reconcile_request(row: dict) -> dict:
 def _cold_reconcile(root: Path, row: dict) -> dict:
     """独立进程按 owner 公开端口冷读同一次发生（不调用转录）。"""
     request = _reconcile_request(row)
-    env = {k: v for k, v in os.environ.items() if k.upper() in _ALLOWED_ENV}
-    env["PYTHONUTF8"] = "1"
-    proc = subprocess.run(
+    env = fixture_environment()
+    proc = run_child(
         [
             sys.executable, "-B", str(REPO / "feedback_owner.py"),
             "--db", str(root / "owner.sqlite"),
@@ -415,7 +401,7 @@ class TestRealEntryDiagnostics:
     def test_hard_stop_leaves_received_headers_linked_to_the_original_operation(self, tmp_path):
         (tmp_path / "audio.wav").write_bytes(b"stub audio for mimo transport")
         command = [sys.executable, "-B", str(RUNNER), "--child", str(REPO), str(tmp_path), "mimo-pause-body"]
-        with subprocess.Popen(command, cwd=tmp_path, env=_child_env(tmp_path), stdout=subprocess.DEVNULL,
+        with open_child(command, cwd=tmp_path, env=_child_env(tmp_path), stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL) as child:
             try:
                 deadline = time.monotonic() + 12

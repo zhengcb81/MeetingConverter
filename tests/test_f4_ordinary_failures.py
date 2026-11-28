@@ -27,22 +27,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from subprocess_support import fixture_environment, open_child
+from subprocess_support import run_child as run_native
 
 REPO = Path(__file__).resolve().parents[1]
 RUNNER = Path(__file__).resolve().parent / "f4_child_runner.py"
 
 #: 子进程环境白名单：清掉继承的反馈变量与一切密钥。
-_ALLOWED_ENV = {
-    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME",
-    "USERPROFILE", "SYSTEMDRIVE", "COMSPEC", "APPDATA", "LOCALAPPDATA",
-}
-_FEEDBACK_VARS = (
-    "RESEARCH_FEEDBACK_OUT",
-    "RESEARCH_FEEDBACK_DIR",
-    "RESEARCH_FEEDBACK_RUN_ID",
-    "RESEARCH_FEEDBACK_ATTEMPT_ID",
-    "RESEARCH_FEEDBACK_STATE_ROOT",
-)
+
 
 IDENTITY_FIELDS = (
     "owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_id",
@@ -57,10 +49,7 @@ OLD_BILINGUAL = "旧对照-上一轮产物\n"
 
 
 def _child_env(root: Path, mode: str) -> dict:
-    env = {k: v for k, v in os.environ.items() if k.upper() in _ALLOWED_ENV}
-    env["PYTHONUTF8"] = "1"
-    for name in _FEEDBACK_VARS:
-        env.pop(name, None)
+    env = fixture_environment()
     if mode in ("out", "both"):
         env["RESEARCH_FEEDBACK_OUT"] = str(root / "single" / "out.jsonl")
     if mode in ("dir", "both"):
@@ -170,7 +159,7 @@ def run_child(root: Path, scenario: str, *, mode: str = "default", timeout: floa
         sys.executable, "-B", "-X", "utf8", str(RUNNER),
         "--child", str(REPO), str(root), scenario,
     ]
-    with subprocess.Popen(
+    with open_child(
         command, cwd=str(root), env=_child_env(root, mode),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     ) as child:
@@ -183,7 +172,7 @@ def start_child(root: Path, scenario: str, *, mode: str = "default"):
         sys.executable, "-B", "-X", "utf8", str(RUNNER),
         "--child", str(REPO), str(root), scenario,
     ]
-    return subprocess.Popen(
+    return open_child(
         command, cwd=str(root), env=_child_env(root, mode),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
@@ -281,8 +270,7 @@ def reconcile_request(row: dict):
 
 
 def call_owner(root: Path, db: Path, sidecar: Path, action: str, payload: dict = None, *, directories=()) -> dict:
-    env = {k: v for k, v in os.environ.items() if k.upper() in _ALLOWED_ENV}
-    env["PYTHONUTF8"] = "1"
+    env = fixture_environment()
     argv = [sys.executable, "-B", str(REPO / "feedback_owner.py"), "--db", str(db),
             "--sidecar", str(sidecar)]
     for directory in directories:
@@ -293,7 +281,7 @@ def call_owner(root: Path, db: Path, sidecar: Path, action: str, payload: dict =
         argv.append(payload["action_id"])
     elif payload is not None:
         body = json.dumps(payload).encode()
-    proc = subprocess.run(
+    proc = run_native(
         argv, input=body, cwd=str(root), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
     )
@@ -824,7 +812,7 @@ class TestDirectStartDelivery:
         env["RESEARCH_FEEDBACK_STATE_ROOT"] = str(state)
         command = [sys.executable, "-B", "-X", "utf8", str(RUNNER), "--child",
                    str(REPO), str(f4_root), "fallback-timeout"]
-        child = subprocess.run(command, cwd=f4_root, env=env, capture_output=True, timeout=20)
+        child = run_native(command, cwd=f4_root, env=env, capture_output=True, timeout=20)
         assert child.returncode == 0
         directory = state / "observations"
         native = Path("\\\\?\\" + str(directory))

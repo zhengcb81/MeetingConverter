@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 import threading
 import wave
@@ -12,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from subprocess_support import fixture_environment, run_child
 from test_s2_mimo_diagnostics import _cold_reconcile, _one_check, _operation_rows
 
 REPO = Path(__file__).resolve().parents[1]
@@ -58,18 +57,14 @@ def _wav(path):
 
 
 def _command(tmp_path, script, *args):
-    keys = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"}
-    env = {key: value for key, value in os.environ.items() if key.upper() in keys}
+    env = fixture_environment()
     env.update(
-        PYTHONUTF8="1", PYTHONIOENCODING="utf-8", NO_PROXY="*",
         RESEARCH_FEEDBACK_OUT=str(tmp_path / "feedback.jsonl"),
         RESEARCH_FEEDBACK_STATE_ROOT=str(tmp_path / "state"),
     )
-    return subprocess.run(
+    return run_child(
         [sys.executable, "-B", str(REPO / script), *map(str, args)],
-        cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, encoding="utf-8",
-        timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", timeout=20,
     )
 
 

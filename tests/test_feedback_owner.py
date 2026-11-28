@@ -1,12 +1,12 @@
 import hashlib
 import json
-import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from subprocess_support import run_child
 
 from core import transcribe_one
 from engines.base import Segment, TranscriptionResult
@@ -59,7 +59,7 @@ def run_case(tmp_path, monkeypatch):
             body = json.dumps(arg).encode("ascii")
         elif arg:
             argv.append(arg)
-        outcome = subprocess.run(argv, input=body, capture_output=True, timeout=15, check=True)
+        outcome = run_child(argv, input=body, capture_output=True, timeout=15, check=True)
         return json.loads(outcome.stdout)
 
     yield call, rows, occurrence, sidecar, db
@@ -174,7 +174,7 @@ def test_degraded_publication_reconciles_as_a_delivered_job(tmp_path):
     occurrence = digest([row[name] for name in
                          ("owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_id")])
     lookup = request("reconcile", [occurrence], {"occurrence_id": occurrence, "observation": row})
-    outcome = subprocess.run(
+    outcome = run_child(
         [sys.executable, "-B", "-X", "utf8", str(CLI), "--db", str(tmp_path / "owner.sqlite"),
          "--sidecar", str(sidecar), "reconcile"],
         input=json.dumps(lookup).encode("ascii"), capture_output=True, timeout=15, check=True,
