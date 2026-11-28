@@ -62,12 +62,11 @@ class FallbackEngine:
             return self._primary.transcribe(audio_path, language, initial_prompt)
         except UnsupportedFormatError as e:
             self._note_primary_failure(e)
-            logger.info(f"格式不支持，回退到备用引擎: {audio_path}")
+            record_failure("engine_fallback", e, notice=(logger, f"格式不支持，回退到备用引擎: {type(e).__name__}"))
             return self._engage_fallback(audio_path, language, initial_prompt)
         except Exception as e:
             self._note_primary_failure(e)
-            logger.warning("主引擎失败(%s)，回退到备用引擎", type(e).__name__)
-            record_failure("engine_fallback", e)
+            record_failure("engine_fallback", e, notice=(logger, f"主引擎失败({type(e).__name__})，回退到备用引擎"))
             return self._engage_fallback(audio_path, language, initial_prompt)
 
     def drain_engine_events(self) -> List[Dict[str, Any]]:
@@ -94,6 +93,7 @@ class FallbackEngine:
             try:
                 self._fallback = self._fallback_factory()
             except Exception as exc:
+                record_failure("fallback_initialization", exc)
                 self._events.append(
                     {
                         "event": "fallback_unavailable",

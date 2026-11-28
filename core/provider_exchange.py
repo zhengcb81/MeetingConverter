@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import json
+from logging import Logger
 from urllib.error import HTTPError
 
 from core.local_diagnostics import record_event, record_failure
@@ -27,9 +28,11 @@ class ProviderExchange:
         self.http_status = status if type(status) is int and 100 <= status <= 599 else None
         record_event(self.stage, "response_headers", request_attempt=self.attempt, http_status=self.http_status)
 
-    def record_failure(self, error: BaseException) -> None:
-        record_failure(self.stage, error, request_attempt=self.attempt,
-                       response_received=self.response_received, http_status=self.http_status)
+    def record_failure(self, error: BaseException, *, notice: tuple[Logger, str] | None = None) -> None:
+        record_failure(
+            self.stage, error, notice=notice, request_attempt=self.attempt,
+            response_received=self.response_received, http_status=self.http_status,
+        )
 
     def read_json(self, opener, request, timeout: float):
         record_event(self.stage, "dispatch_started", request_attempt=self.attempt)

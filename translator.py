@@ -86,16 +86,13 @@ class Translator:
                 cleaned = self._clean_output(raw)
                 return apply_corrections(cleaned, corrections)
             except Exception as e:
-                exchange.record_failure(e)
                 if exchange.may_retry and attempt < max_attempts - 1:
                     wait = 2 ** (attempt + 1)
-                    logger.warning(
-                        "  翻译重试 %d/%d (%ds): %s",
-                        attempt + 1, max_attempts, wait, type(e).__name__,
-                    )
+                    message = f"  翻译重试 {attempt + 1}/{max_attempts} ({wait}s): {type(e).__name__}"
+                    exchange.record_failure(e, notice=(logger, message))
                     time.sleep(wait)
                 else:
-                    logger.error("  翻译失败: %s", type(e).__name__)
+                    exchange.record_failure(e, notice=(logger, f"  翻译失败: {type(e).__name__}"))
                     raise TranslationError(f"翻译失败（{attempt + 1}次尝试后）") from e
 
     @staticmethod

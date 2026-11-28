@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
@@ -12,7 +11,8 @@ from contextlib import closing
 from pathlib import Path
 from urllib.parse import quote
 
-from core.feedback import feedback_io_path
+from core.feedback_runtime import feedback_io_path, redact_diagnostic, safe_identity
+from core.local_diagnostics import DiagnosticArgumentParser, diagnosed_command, record_event, record_failure
 
 OWNER = "meeting-converter"
 PUBLICATION = "mc-publication/1"
@@ -82,6 +82,69 @@ def _validate(action, request):
     return key, body
 
 
+def _observation_coordinates(row):
+    if not isinstance(row, dict):
+        return row
+    return {
+        **row,
+        **{name: safe_identity(row[name]) for name in ("run_id", "attempt_id")
+           if isinstance(row.get(name), str)},
+    }
+
+
+def _has_credentials(value):
+    """Inspect strings before encoding so folded credentials remain recognizable."""
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            if redact_diagnostic(current) != current:
+                return True
+        elif isinstance(current, dict):
+            pending.extend(current)
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    return False
+
+
+def _request_hash(receipt):
+    request = receipt.get("request")
+    return _digest(request) if isinstance(request, dict) else receipt.get("request_sha256")
+
+
+def _action_receipt(request, body, result):
+    if not _has_credentials(request):
+        return {"request": request, "result": result}
+    return {
+        "request_sha256": _digest(request), "result": result, "kind": request["kind"],
+        "observation_sha256": _digest(_observation_coordinates(body.get("observation"))),
+        "original_occurrence_sha256": _digest(body.get("original_occurrence_id")),
+    }
+
+
+def _public_action_receipt(receipt):
+    request = receipt.get("request")
+    if isinstance(request, dict) and not _has_credentials(request):
+        return {"request": request, "result": receipt["result"]}
+    return {"request_sha256": _request_hash(receipt), "result": receipt["result"]}
+
+
+def _same_observation(receipt, row):
+    fingerprint = receipt.get("observation_sha256")
+    if fingerprint is None:
+        frozen = receipt["request"]["payload"].get("observation")
+        fingerprint = _digest(_observation_coordinates(frozen))
+    return fingerprint == _digest(_observation_coordinates(row))
+
+
+def _same_original_occurrence(receipt, occurrence):
+    fingerprint = receipt.get("original_occurrence_sha256")
+    if fingerprint is None:
+        fingerprint = _digest(receipt["request"]["payload"].get("original_occurrence_id"))
+    return fingerprint == _digest(occurrence)
+
+
 def _rows(path):
     try:
         with feedback_io_path(path).open("rb") as stream:
@@ -120,6 +183,7 @@ class OwnerRuntime:
 
     def _original(self, row, *, include_details=False):
         """Locate the exact occurrence and its sibling terminal, not an audio path."""
+        row = _observation_coordinates(row)
         scope = tuple(row[field] for field in IDENTITY[:-1])
         paths = list(self.sidecars)
         for directory in self.sidecar_dirs:
@@ -129,6 +193,7 @@ class OwnerRuntime:
         for path in paths:
             for saved in _rows(path):
                 saved.setdefault("origin_owner", saved.get("owner"))
+                saved = _observation_coordinates(saved)
                 if tuple(saved.get(field) for field in IDENTITY[:-1]) != scope:
                     continue
                 check = saved.get("check_id")
@@ -234,7 +299,7 @@ class OwnerRuntime:
         triage = self._get(connection, _digest(["triage", OWNER, occurrence]))
         repaired = self._get(connection, _digest(["repair", OWNER, issue, GENERATION]))
         if (not triage or not repaired or repaired["result"]["fixed_version"] != version
-                or triage["request"]["payload"].get("observation") != row):
+                or not _same_observation(triage, row)):
             return {"verdict": "unknown"}
         publication = repaired["publication"]
         verified = publication == triage["publication"] and version == _publication_version(publication)
@@ -250,7 +315,7 @@ class OwnerRuntime:
         result = prior["result"]
         if (result.get("verified_version") != version or result.get("verdict") != body["verdict"]
                 or result.get("evidence_ref") != body.get("evidence_ref")
-                or prior["request"]["payload"].get("original_occurrence_id") != body.get("original_occurrence_id")):
+                or not _same_original_occurrence(prior, body.get("original_occurrence_id"))):
             return None
         return {"recorded": True}
 
@@ -264,7 +329,7 @@ class OwnerRuntime:
             connection.execute("BEGIN IMMEDIATE")
             saved = self._get(connection, key)
             if saved is not None:
-                if _digest(saved["request"]) != _digest(request):
+                if _request_hash(saved) != _digest(request):
                     raise ValueError("conflicting action request")
                 return {"result": saved["result"]}
 
@@ -279,7 +344,7 @@ class OwnerRuntime:
                 result = self._report(connection, body)
             if result is None:
                 return {"state": "unknown"}
-            receipt = {"request": request, "result": result}
+            receipt = _action_receipt(request, body, result)
             if publication is not None:
                 receipt["publication"] = publication
             connection.execute("INSERT INTO actions VALUES (?, ?)", (key, _json(receipt)))
@@ -316,8 +381,9 @@ def _publication(occurrence, row, detail):
             "current": current, "retained": sorted(retained), "missing": sorted(missing)}
 
 
+@diagnosed_command("feedback-owner")
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = DiagnosticArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, type=Path)
     parser.add_argument("--sidecar", action="append", type=Path, default=[])
     parser.add_argument("--sidecar-dir", action="append", type=Path, default=[])
@@ -328,24 +394,29 @@ def main(argv=None):
         commands.add_parser(action).add_argument("action_id")
     args = parser.parse_args(argv)
     owner = OwnerRuntime(args.db, args.sidecar, args.sidecar_dir)
+    exit_code = 0
     try:
         if args.action.startswith("get-"):
             receipt = owner.read(args.action_id)
             payload = {}
             if receipt is not None:
                 if args.action == "get-action":
-                    payload = {"receipt": {name: receipt[name] for name in ("request", "result")}}
-                elif receipt["request"]["kind"] == "repair":
+                    payload = {"receipt": _public_action_receipt(receipt)}
+                elif receipt.get("kind", receipt.get("request", {}).get("kind")) == "repair":
                     publication = receipt.get("publication")
                     if publication is not None and _publication_version(publication) == receipt["result"].get("fixed_version"):
                         payload = {"publication": publication}
         else:
             payload = owner.dispatch(args.action, json.load(sys.stdin, object_pairs_hook=_unique))
-        print(_json(payload))
+            if payload.get("state") == "unknown":
+                record_event(args.action, "unconfirmed")
+        response = _json(payload)
     except (ValueError, OSError, sqlite3.Error, RecursionError) as error:
-        print(_json({"state": "unknown", "error_type": type(error).__name__}))
-        return 2
-    return 0
+        record_failure(args.action, error)
+        response = _json({"state": "unknown", "error_type": type(error).__name__})
+        exit_code = 2
+    print(response)
+    return exit_code
 
 
 if __name__ == "__main__":

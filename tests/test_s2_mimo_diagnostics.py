@@ -517,10 +517,12 @@ class TestRealEntryDiagnostics:
         assert not (root / "out" / "audio_原文.txt").exists()
         _assert_no_secret(result["stdout"])
         _assert_no_secret(result["stderr"])
-        assert "attempts=3" in result["stdout"]
-        assert "error_type=HTTPError" in result["stdout"]
-        assert "http_status=500" in result["stdout"]
-        assert "location=engines/mimo.py" in result["stdout"]
+        assert "attempts=3" in result["stderr"]
+        assert "attempts=3" not in result["stdout"]
+        assert "error_type=HTTPError" in result["stderr"]
+        assert "http_status=500" in result["stderr"]
+        assert "location=engines/mimo.py" in result["stderr"]
+        assert result["stdout"] == ""
 
         calls = _transport_calls(root)
         assert [call["attempt"] for call in calls] == [1, 2, 3]

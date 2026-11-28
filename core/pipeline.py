@@ -232,9 +232,9 @@ def transcribe_one(
                                     progress_callback=lambda c, n: logger.info(f"  翻译: {c}/{n}"),
                                 )
                         except TranslationError as e:
-                            logger.warning("翻译失败，跳过翻译文件: %s", type(e).__name__)
+                            message = f"翻译失败，跳过翻译文件: {type(e).__name__}"
                             with operation_scope(feedback.step_id, feedback.input_id):
-                                record_failure("translation", e)
+                                record_failure("translation", e, notice=(logger, message))
                             feedback.note_error(e)
                             translations = None
                             translation_failed = True

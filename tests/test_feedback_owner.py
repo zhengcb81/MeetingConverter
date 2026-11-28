@@ -1,12 +1,13 @@
 import hashlib
 import json
+import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from subprocess_support import run_child
+from subprocess_support import fixture_environment, run_child
 
 from core import transcribe_one
 from engines.base import Segment, TranscriptionResult
@@ -59,13 +60,152 @@ def run_case(tmp_path, monkeypatch):
             body = json.dumps(arg).encode("ascii")
         elif arg:
             argv.append(arg)
-        outcome = run_child(argv, input=body, capture_output=True, timeout=15, check=True)
+        env = {**fixture_environment(), "RESEARCH_FEEDBACK_STATE_ROOT": str(tmp_path / "diagnostics")}
+        outcome = run_child(argv, input=body, env=env, capture_output=True, timeout=15, check=True)
         return json.loads(outcome.stdout)
 
     yield call, rows, occurrence, sidecar, db
     assert stale.read_text(encoding="utf-8") == "existing translated bytes"
     engine.transcribe.assert_called_once()
     translator.translate_paragraphs.assert_called_once()
+
+
+@pytest.mark.e2e_offline
+@pytest.mark.parametrize("layout", ("primary", "fallback", "unavailable"))
+def test_bad_owner_request_has_local_trace_and_preserves_wire_result(tmp_path, layout):
+    primary, fallback = tmp_path / "local-state", tmp_path / "feedback-inbox"
+    if layout != "primary":
+        primary.write_bytes(b"original primary blocker")
+    if layout == "unavailable":
+        fallback.write_bytes(b"original fallback blocker")
+    env = fixture_environment()
+    env.update(
+        RESEARCH_FEEDBACK_STATE_ROOT=str(primary),
+        RESEARCH_FEEDBACK_DIR=str(fallback),
+        RESEARCH_FEEDBACK_RUN_ID="owner-native-run",
+        RESEARCH_FEEDBACK_ATTEMPT_ID="owner-native-attempt",
+    )
+    db = tmp_path / "owner.sqlite"
+    credential = b"synthetic-owner-bearer-value-for-local-test"
+    request_body = b'{"payload":"Authorization: Bearer ' + credential
+    result = run_child(
+        [sys.executable, "-B", str(CLI), "--db", str(db), "reconcile"],
+        cwd=tmp_path, input=request_body, env=env, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout) == {"state": "unknown", "error_type": "JSONDecodeError"}
+    assert credential not in result.stdout + result.stderr
+    assert not db.exists()
+    if layout == "unavailable":
+        notice, = result.stderr.decode("utf-8").splitlines()
+        assert "diagnostic_log_unavailable" in notice
+        assert primary.read_bytes() == b"original primary blocker"
+        assert fallback.read_bytes() == b"original fallback blocker"
+        return
+    assert result.stderr == b""
+    root = primary if layout == "primary" else fallback
+    recorded = (root / "logs" / "feedback-owner.jsonl").read_bytes()
+    assert credential not in recorded
+    rows = list(map(json.loads, recorded.splitlines()))
+    fault, = [row for row in rows if row["phase"] == "error"]
+    assert (fault["run_id"], fault["attempt_id"]) == ("owner-native-run", "owner-native-attempt")
+    assert fault["error_type"] == "JSONDecodeError" and "feedback_owner.py" in fault["location"]
+
+
+def test_legacy_credentials_can_be_cold_read_without_restoring_secret_requests(run_case):
+    call, rows, _, sidecar, db = run_case
+    scope = ("owner", "origin_owner", "run_id", "attempt_id", "step_id", "check_id")
+    userinfo = "synthetic-legacy-userinfo-proof"
+    folded = "synthetic-legacy-auth-proof"
+    labels = {
+        "run_id": f"HTTP 403-https://user:{userinfo}@fixture.invalid/",
+        "attempt_id": f"Authorization:\r\n Basic\r\n {folded}",
+    }
+    previous = [
+        {**json.loads(line), **labels}
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+    ]
+    frozen = ("\n".join(json.dumps(row) for row in previous) + "\n").encode()
+    sidecar.write_bytes(frozen)
+    old = {**rows["action-started"], **labels}
+    opaque = {**old, **{field: "redacted-" + hashlib.sha256(value.encode()).hexdigest()
+                         for field, value in labels.items()}}
+
+    def command(kind, row):
+        occurrence = digest([row[key] for key in scope])
+        return request(kind, [occurrence], {"occurrence_id": occurrence, "observation": row})
+
+    native = call("reconcile", command("reconcile", old))
+    assert native["state"] == "done" and native["result"]["cost_state"] == "unknown"
+    assert call("reconcile", command("reconcile", opaque)) == native
+    action = command("triage", old)
+    result = call("triage", action)
+    assert result == call("triage", action)
+    assert result["result"]["decision"] == "expected"
+    receipt = {"request_sha256": digest(action), "result": result["result"]}
+    assert call("get-action", action["action_id"]) == {"receipt": receipt}
+    for secret in (userinfo, folded):
+        assert secret.encode() not in db.read_bytes()
+    assert sidecar.read_bytes() == frozen
+
+    repairable = {**rows["requested-outputs"], **labels}
+    triage = command("triage", repairable)
+    decision = call("triage", triage)["result"]
+    assert decision["decision"] == "repair"
+    issue, generation = decision["issue_ref"], decision["generation"]
+    repair = request("repair", [issue, generation], {"issue_ref": issue, "generation": generation})
+    repair_result = call("repair", repair)["result"]
+    occurrence = triage["payload"]["occurrence_id"]
+    version = repair_result["fixed_version"]
+    replay_scope = [occurrence, OWNER, issue, version]
+    replay = request("replay", replay_scope, {
+        "occurrence_id": occurrence, "original_occurrence_id": occurrence, "observation": repairable,
+        "issue_owner": OWNER, "issue_ref": issue, "fixed_version": version, "acquisition": "reuse_only",
+    })
+    proof = call("replay", replay)["result"]
+    assert proof["verdict"] == "verified"
+    report = request("report", [*replay_scope, "verified"], {
+        "occurrence_id": occurrence, "original_occurrence_id": occurrence, "origin_owner": OWNER,
+        "issue_ref": issue, "fixed_version": version, "verdict": "verified", "evidence_ref": proof["evidence_ref"],
+    })
+    assert call("report", report) == {"result": {"recorded": True}}
+    for secret in (userinfo, folded):
+        assert secret.encode() not in db.read_bytes()
+
+    # Existing raw receipt bytes remain frozen. The public projection is safe
+    # even when they were written by a previously installed version.
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE actions SET receipt=? WHERE action_id=?",
+                           (json.dumps({"request": action, "result": result["result"]}), action["action_id"]))
+    old_db = db.read_bytes()
+    assert call("get-action", action["action_id"]) == {"receipt": receipt}
+    assert db.read_bytes() == old_db
+    assert sidecar.read_bytes() == frozen
+
+
+@pytest.mark.e2e_offline
+def test_native_argument_error_redacts_credentials_and_keeps_argv_exit(tmp_path):
+    secrets = ("synthetic-basic-secret", "synthetic-folded-secret", "synthetic-userinfo-secret",
+               "ghp_" + "a" * 24, "synthetic-folded-continuation")
+    supplied = [
+        f"Authorization: Basic {secrets[0]}",
+        f"Authorization:\r\n Bearer\r\n {secrets[1]}\r\n\t{secrets[4]}\nPreserved error boundary",
+        f"HTTP403-https://user:{secrets[2]}@fixture.invalid/path",
+        secrets[3],
+    ]
+    env = {**fixture_environment(), "RESEARCH_FEEDBACK_STATE_ROOT": str(tmp_path)}
+    process = run_child(
+        [sys.executable, "-B", str(CLI), "--db", str(tmp_path / "owner.sqlite"),
+         "reconcile", "--unrecognized", *supplied],
+        capture_output=True, env=env, cwd=tmp_path, timeout=15,
+    )
+    assert process.returncode == 2 and not process.stdout
+    assert b"unrecognized arguments" in process.stderr
+    assert b"Preserved error boundary" in process.stderr
+    local = (tmp_path / "logs" / "feedback-owner.jsonl").read_bytes()
+    for secret in secrets:
+        assert secret.encode() not in process.stderr + local
+    assert not (tmp_path / "owner.sqlite").exists()
 
 
 def test_native_repair_reuses_the_original_evidence_and_saves_one_report(run_case):

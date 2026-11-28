@@ -17,7 +17,6 @@ MeetingConverter - 投资者会议音频转文字引擎 (v2)
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import sys
@@ -33,7 +32,13 @@ from core.feedback import (
     STARTUP_REQUEST_REJECTED,
     begin_startup,
 )
-from core.local_diagnostics import cli_diagnostics, record_event, record_failure
+from core.local_diagnostics import (
+    DiagnosticArgumentParser,
+    DiagnosticFormatter,
+    cli_diagnostics,
+    record_event,
+    record_failure,
+)
 from engines.factory import create_engine
 from exceptions import ConfigError
 from translator import Translator
@@ -77,7 +82,7 @@ def main():
 
 
 def _run(startup) -> int:
-    parser = argparse.ArgumentParser(
+    parser = DiagnosticArgumentParser(
         description="MeetingConverter v2 - 音频转文字+翻译"
     )
     parser.add_argument("input", help="音频文件或目录")
@@ -123,18 +128,16 @@ def _run(startup) -> int:
 
     # 配置 logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(message)s",
-        stream=sys.stdout,
-    )
+    progress = logging.StreamHandler(sys.stderr)
+    progress.setFormatter(DiagnosticFormatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.basicConfig(level=log_level, handlers=[progress])
 
     # 请求意图在初始边界保存：翻译是否被请求与翻译器是否可用是两件事。
     translate_requested = not args.no_translate
 
     audio_files = get_audio_files(args.input)
     if not audio_files:
-        logger.info("错误: 未找到音频文件")
+        print("错误: 未找到音频文件")
         record_failure("input", FileNotFoundError())
         startup.record_outcome(
             STARTUP_REQUEST_REJECTED,
@@ -164,8 +167,7 @@ def _run(startup) -> int:
         settings = normalize_config({**raw, **overrides})
         settings.validate_transcription()
     except (ConfigError, json.JSONDecodeError, UnicodeError, OSError) as exc:
-        logger.error("错误: 无法使用 config.json: %s", type(exc).__name__)
-        record_failure("config", exc)
+        record_failure("config", exc, notice=(logger, f"错误: 无法使用 config.json: {type(exc).__name__}"))
         startup.record_outcome(
             STARTUP_LOCAL_IO_FAILED if isinstance(exc, OSError) else STARTUP_REQUEST_REJECTED,
             stage="config",
